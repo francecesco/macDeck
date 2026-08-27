@@ -46,7 +46,7 @@ Identificato leggendo il firmware di fabbrica in flash, che contiene le stringhe
 | Scheda | Guition JC3248W535 (venduta anche come "Diymore ESP32-S3 3.5\"") |
 | Chip | ESP32-S3 rev v0.2 (QFN56), 16 MB flash quad, 8 MB PSRAM ottale (`N16R8`) |
 | MAC | `AA:BB:CC:DD:EE:FF` |
-| Display | 3.5" IPS 320×480, controller **AXS15231B**, bus **QSPI** |
+| Display | 3.5" IPS **320×480 verticale**, controller **AXS15231B**, bus **QSPI** |
 | Touch | capacitivo integrato nell'AXS15231B, I²C addr `0x3B` |
 | Extra | slot microSD (SDMMC), audio I²S, USB-Serial/JTAG nativo |
 | Porta | `/dev/cu.usbmodem13301` |
@@ -79,7 +79,19 @@ differenza importante rispetto al progetto `plancia-ingresso`, che ha richiesto
 
 Il backlight **non** è gestito dal preset: va dichiarato come `output: ledc` su
 GPIO1 più `light: monochromatic`. Scelta deliberata — dà dimmerazione e
-auto-spegnimento per inattività senza codice aggiuntivo.
+auto-spegnimento per inattività senza codice aggiuntivo. `dimensions` resta
+obbligatorio anche con un preset che le contiene già.
+
+### L'orientamento è verticale, e non è una scelta
+
+`esphome config` rifiuta il `transform` sul display con **"Axis swapping not
+supported by this model"**: nel preset l'AXS15231 ha `swap_xy=cv.UNDEFINED`.
+Il landscape non è ottenibile e il display resta **320×480 verticale**.
+
+Non è un vincolo da subire: in verticale la griglia di default 3×4 dà tile
+quasi quadrate da **101×99**, che per uno Stream Deck legge meglio del 4×3
+orizzontale. La geometria dinamica del §3.1 assorbe il cambio senza che nulla
+del protocollo si muova.
 
 Firmware di fabbrica salvato come backup (dump di `app0`, 2 MB) prima di
 qualunque flash.
@@ -94,7 +106,7 @@ Tre componenti, una sola sorgente di verità.
 ┌─────────────────────────┐         ┌──────────────────────────────────┐
 │  JC3248W535 (ESPHome)   │  WiFi   │  Mac — agent `macdeck` (Python)  │
 │                         │  HTTP   │  FastAPI + uvicorn su :8765      │
-│  griglia 4×3 di slot    │◄───────►│                                  │
+│  griglia 3×4 di slot    │◄───────►│                                  │
 │  + header di stato      │         │  ┌────────────────────────────┐  │
 │                         │         │  │ web UI config → browser    │  │
 │  NESSUNA logica         │         │  ├────────────────────────────┤  │
@@ -133,11 +145,11 @@ Motivazioni:
 Poiché `x`, `y`, `width` e `height` sono proprietà di stile LVGL aggiornabili a
 runtime, il firmware non ha nemmeno la griglia compilata: riceve per ogni slot
 posizione e dimensione. Ne segue che **griglia e dimensione delle tile sono
-configurabili dal Mac** — una pagina 4×3 con tile da 115×80 e una pagina 3×2 con
-tile da 154×122 convivono senza toccare il firmware.
+configurabili dal Mac** — una pagina 3×4 con tile da 101×99 e una pagina 2×2 con
+tile da 154×202 convivono senza toccare il firmware.
 
-Costo accettato: con la griglia di default (4×3, tile 115×80) sono 12 × 115×80 ×
-2 byte (RGB565) ≈ 220 KB di PSRAM su 8 MB disponibili, e 12 GET HTTP al boot,
+Costo accettato: con la griglia di default (3×4, tile 101×99) sono 12 × 101×99 ×
+2 byte (RGB565) ≈ 240 KB di PSRAM su 8 MB disponibili, e 12 GET HTTP al boot,
 ~1-2 s sulla LAN. Una griglia più larga usa meno tile ma più grandi: il totale
 resta nell'ordine dei 250 KB perché copre sempre la stessa area di schermo.
 
@@ -207,8 +219,8 @@ Sorgente di verità, in `~/.config/macdeck/layout.yaml`.
 schema: 1                  # versione del formato, per migrazioni future
 
 grid:                      # default per tutte le pagine
-  cols: 4
-  rows: 3
+  cols: 3
+  rows: 4
 
 theme:                     # usato dal renderer Pillow
   background: "#12141A"
@@ -236,14 +248,14 @@ pages:
             - {type: delay, ms: 200}
             - {type: shell, cmd: "cd ~/src/foo && git add -A && git commit -m wip && git push"}
 
-      - pos: [3, 2]
+      - pos: [2, 3]
         label: Muto
         icon: "mdi:volume-off"
         action: {type: volume, op: mute_toggle}
         state: volume.muted                      # opzionale: illumina la tile
 
   - name: Media
-    grid: {cols: 3, rows: 2}                     # tile piu' grandi, solo per questa pagina
+    grid: {cols: 2, rows: 2}                     # tile piu' grandi, solo per questa pagina
     slots: []
 ```
 
@@ -313,30 +325,30 @@ Il TTF di MDI viene scaricato una volta in `~/.config/macdeck/fonts/`.
 
 ## 5. UI
 
-### 5.1 Display — 480×320 landscape
+### 5.1 Display — 320×480 verticale
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ 18:42   🔊 62%  ♫ Anagrafe — Marlene Kuntz    CPU 14% 🔋 │  header 36 px
-├──────────┬──────────┬──────────┬──────────────────────────┤
-│          │          │          │          │
-│ DataGrip │  Commit  │  Slack   │  Chrome  │   griglia 4×3
-│          │  & push  │          │          │   tile 115×80
-├──────────┼──────────┼──────────┼──────────┤
-│  ...     │   ...    │   ...    │   ...    │
-├──────────┼──────────┼──────────┼──────────┤
-│  ...     │   ...    │   ...    │   ...    │
-├──────────┴──────────┴──────────┴──────────┤
-│  ‹    Dev  ●  Media  ○  Casa  ○        ›  │  navbar 28 px
-└───────────────────────────────────────────┘
+┌────────────────────────────────┐
+│ 38%  ♫ Anagrafe — M.K.  cpu 14%│  header 36 px
+├──────────┬──────────┬──────────┤
+│ VS Code  │ DataGrip │  iTerm   │
+├──────────┼──────────┼──────────┤  griglia 3×4
+│Sourcetree│  Chrome  │ Postman  │  tile 101×99
+├──────────┼──────────┼──────────┤
+│  Docker  │  Slack   │Screenshot│
+├──────────┼──────────┼──────────┤
+│ Mission  │Spotlight │  Blocca  │
+├──────────┴──────────┴──────────┤
+│  ‹    Pagina 1/3 · Dev      ›  │  navbar 28 px
+└────────────────────────────────┘
 ```
 
-Questa è la griglia **di default**, non un vincolo del firmware: 4×3 su un'area
-di 480×256 con gutter da 4 px dà tile di 115×80. `layout.yaml` può dichiarare una
+Questa è la griglia **di default**, non un vincolo del firmware: 3×4 su un'area
+di 320×416 con gutter da 4 px dà tile di 101×99. `layout.yaml` può dichiarare una
 griglia diversa, per pagina, e il renderer ricalcola le dimensioni.
 
-`transform: swap_xy` per il landscape. Il touchscreen richiede la stessa
-trasformazione, altrimenti gli assi risultano scambiati.
+Nessun `transform`, né sul display né sul touchscreen: l'AXS15231B non supporta
+lo scambio degli assi e ESPHome rifiuta la configurazione in validazione.
 
 Le pagine sono **illimitate**: la navbar mostra frecce e indicatori, il firmware
 non ha un numero di pagine compilato. Cambio pagina gestito localmente in LVGL
@@ -355,7 +367,7 @@ inattività, riaccensione al tocco (il primo tocco a schermo spento accende e
 Single page servita dall'agent su `http://127.0.0.1:8765`, HTML+JS senza build
 step né dipendenze esterne.
 
-- griglia 4×3 in scala reale che riproduce il display, con le tile renderizzate
+- griglia 3×4 in scala reale che riproduce il display, con le tile renderizzate
   dallo stesso endpoint `/tile/...` che usa il display — quello che vedi nel
   browser è esattamente quello che appare sul display;
 - drag & drop per spostare una tile fra slot e fra pagine;

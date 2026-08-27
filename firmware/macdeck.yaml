@@ -1,0 +1,746 @@
+# MacDeck — Guition JC3248W535 (ESP32-S3, 3.5" 320x480, AXS15231B QSPI)
+#
+# Il firmware e' un renderer muto: non conosce ne' app ne' icone ne' la
+# griglia. Riceve da /layout la posizione, la dimensione e l'URL di ogni
+# tile, e al tocco manda {page, slot} a /press.
+#
+# La geometria si applica chiamando l'API C di LVGL da lambda: x, y, width e
+# height sono proprieta' di stile aggiornabili, ma non e' garantito che
+# accettino !lambda, mentre lv_obj_set_pos/lv_obj_set_size funzionano sempre.
+#
+# ORIENTAMENTO: 320x480 VERTICALE. L'AXS15231B non supporta lo scambio degli
+# assi (swap_xy e' UNDEFINED nel preset di ESPHome, che rifiuta il transform
+# in fase di validazione), quindi il landscape non e' ottenibile. La griglia
+# di default e' 3x4, che in verticale da' tile quasi quadrate da 101x99.
+
+substitutions:
+  name: macdeck
+  agent_host: "nome-del-mac.local"
+  agent_port: "8765"
+
+esphome:
+  name: ${name}
+  friendly_name: MacDeck
+  min_version: 2026.5.0
+  on_boot:
+    - priority: -100
+      then:
+        - delay: 3s
+        - script.execute: fetch_layout
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      # Fa risolvere i nomi .local dal resolver standard: e' cio' che
+      # permette di chiamare il Mac per nome Bonjour invece che per IP.
+      CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES: "y"
+
+psram:
+  mode: octal
+  # 80 MHz e non 120: la plancia ha insegnato che l'instabilita' della PSRAM
+  # si manifesta come rollback OTA silenzioso, pessimo da diagnosticare.
+  speed: 80MHz
+
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "MacDeck Fallback"
+
+captive_portal:
+
+mdns:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+json:
+
+# ---------------------------------------------------------------- display
+
+spi:
+  id: display_qspi
+  type: quad
+  clk_pin: 47
+  data_pins: [21, 48, 40, 39]
+
+display:
+  - platform: mipi_spi
+    model: JC3248W535
+    id: main_display
+    spi_id: display_qspi
+    dimensions:
+      width: 320
+      height: 480
+    update_interval: never
+    auto_clear_enabled: false
+
+output:
+  - platform: ledc
+    pin: 1
+    id: backlight_out
+
+light:
+  - platform: monochromatic
+    output: backlight_out
+    id: backlight
+    name: "Retroilluminazione"
+    restore_mode: ALWAYS_ON
+    default_transition_length: 250ms
+
+i2c:
+  - id: touch_bus
+    sda: 4
+    scl: 8
+
+touchscreen:
+  - platform: axs15231
+    id: main_touch
+    i2c_id: touch_bus
+    display: main_display
+    on_touch:
+      # Il primo tocco a schermo spento riaccende e NON attiva il pulsante
+      # sotto: LVGL e' in pausa, quindi non riceve l'evento.
+      - if:
+          condition:
+            lambda: 'return !id(backlight).current_values.is_on();'
+          then:
+            - light.turn_on: backlight
+            - lvgl.resume:
+
+# ------------------------------------------------------------------- rete
+
+http_request:
+  id: http
+  timeout: 4s
+  verify_ssl: false
+
+globals:
+  - id: layout_version
+    type: int
+    restore_value: false
+    initial_value: "-1"
+  - id: current_page
+    type: int
+    restore_value: false
+    initial_value: "0"
+  - id: page_count
+    type: int
+    restore_value: false
+    initial_value: "1"
+  - id: agent_online
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: fail_streak
+    type: int
+    restore_value: false
+    initial_value: "0"
+  - id: state_keys
+    type: std::array<std::string, 12>
+    restore_value: false
+
+# --------------------------------------------------------------- immagini
+
+online_image:
+  - id: tile_0
+    url: "http://${agent_host}:${agent_port}/tile/0/0.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_0
+
+  - id: tile_1
+    url: "http://${agent_host}:${agent_port}/tile/0/1.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_1
+
+  - id: tile_2
+    url: "http://${agent_host}:${agent_port}/tile/0/2.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_2
+
+  - id: tile_3
+    url: "http://${agent_host}:${agent_port}/tile/0/3.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_3
+
+  - id: tile_4
+    url: "http://${agent_host}:${agent_port}/tile/0/4.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_4
+
+  - id: tile_5
+    url: "http://${agent_host}:${agent_port}/tile/0/5.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_5
+
+  - id: tile_6
+    url: "http://${agent_host}:${agent_port}/tile/0/6.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_6
+
+  - id: tile_7
+    url: "http://${agent_host}:${agent_port}/tile/0/7.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_7
+
+  - id: tile_8
+    url: "http://${agent_host}:${agent_port}/tile/0/8.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_8
+
+  - id: tile_9
+    url: "http://${agent_host}:${agent_port}/tile/0/9.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_9
+
+  - id: tile_10
+    url: "http://${agent_host}:${agent_port}/tile/0/10.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_10
+
+  - id: tile_11
+    url: "http://${agent_host}:${agent_port}/tile/0/11.png"
+    format: PNG
+    type: RGB565
+    buffer_size: 32768
+    request_headers:
+      X-Deck-Token: !secret deck_token
+    on_download_finished:
+      then:
+        - lvgl.widget.redraw: tile_img_11
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_hdr
+    size: 15
+    glyphsets: [GF_Latin_Core]
+  - file: "gfonts://Roboto"
+    id: font_nav
+    size: 13
+    glyphsets: [GF_Latin_Core]
+
+# ---------------------------------------------------------------- script
+
+script:
+  - id: fetch_layout
+    mode: restart
+    then:
+      - http_request.get:
+          url: !lambda |-
+            return "http://${agent_host}:${agent_port}/layout?page=" +
+                   to_string(id(current_page));
+          request_headers:
+            X-Deck-Token: !secret deck_token
+          capture_response: true
+          max_response_buffer_size: 4096
+          on_response:
+            then:
+              - lambda: |-
+                  if (response->status_code != 200) {
+                    ESP_LOGW("macdeck", "/layout ha risposto %d",
+                             response->status_code);
+                    return;
+                  }
+                  lv_obj_t *imgs[12] = {
+                    id(tile_img_0), id(tile_img_1), id(tile_img_2), id(tile_img_3),
+                    id(tile_img_4), id(tile_img_5), id(tile_img_6), id(tile_img_7),
+                    id(tile_img_8), id(tile_img_9), id(tile_img_10), id(tile_img_11)};
+                  esphome::online_image::OnlineImage *tiles[12] = {
+                    id(tile_0), id(tile_1), id(tile_2), id(tile_3),
+                    id(tile_4), id(tile_5), id(tile_6), id(tile_7),
+                    id(tile_8), id(tile_9), id(tile_10), id(tile_11)};
+                  bool used[12] = {false};
+                  json::parse_json(body, [&](JsonObject root) -> bool {
+                    id(layout_version) = root["version"] | -1;
+                    id(page_count) = root["pages"].size();
+                    for (JsonObject s : root["slots"].as<JsonArray>()) {
+                      int i = s["i"] | -1;
+                      if (i < 0 || i > 11) continue;
+                      lv_obj_set_pos(imgs[i], s["x"] | 0, s["y"] | 0);
+                      lv_obj_set_size(imgs[i], s["w"] | 0, s["h"] | 0);
+                      lv_obj_clear_flag(imgs[i], LV_OBJ_FLAG_HIDDEN);
+                      std::string path = s["url"] | "";
+                      tiles[i]->set_url(
+                        "http://${agent_host}:${agent_port}" + path);
+                      tiles[i]->update();
+                      id(state_keys)[i] = std::string(s["state"] | "");
+                      used[i] = true;
+                    }
+                    return true;
+                  });
+                  for (int i = 0; i < 12; i++) {
+                    if (!used[i]) {
+                      lv_obj_add_flag(imgs[i], LV_OBJ_FLAG_HIDDEN);
+                      id(state_keys)[i] = "";
+                    }
+                  }
+      - lvgl.label.update:
+          id: nav_label
+          text: !lambda |-
+            return "Pagina " + to_string(id(current_page) + 1) + "/" +
+                   to_string(id(page_count));
+
+  - id: fetch_state
+    mode: restart
+    then:
+      - http_request.get:
+          url: "http://${agent_host}:${agent_port}/state"
+          request_headers:
+            X-Deck-Token: !secret deck_token
+          capture_response: true
+          max_response_buffer_size: 2048
+          on_response:
+            then:
+              - lambda: |-
+                  if (response->status_code != 200) return;
+                  id(fail_streak) = 0;
+                  id(agent_online) = true;
+                  lv_obj_t *imgs[12] = {
+                    id(tile_img_0), id(tile_img_1), id(tile_img_2), id(tile_img_3),
+                    id(tile_img_4), id(tile_img_5), id(tile_img_6), id(tile_img_7),
+                    id(tile_img_8), id(tile_img_9), id(tile_img_10), id(tile_img_11)};
+                  json::parse_json(body, [&](JsonObject root) -> bool {
+                    char buf[96];
+
+                    int vol = root["volume"]["level"] | -1;
+                    bool muted = root["volume"]["muted"] | false;
+                    if (vol < 0)    snprintf(buf, sizeof(buf), "--");
+                    else if (muted) snprintf(buf, sizeof(buf), "muto");
+                    else            snprintf(buf, sizeof(buf), "%d%%", vol);
+                    lv_label_set_text(id(hdr_volume), buf);
+
+                    const char *title = root["media"]["title"] | "";
+                    lv_label_set_text(id(hdr_media), title);
+
+                    float cpu = root["system"]["cpu"] | 0.0f;
+                    int bat = root["system"]["battery"] | -1;
+                    if (bat >= 0)
+                      snprintf(buf, sizeof(buf), "cpu %.0f%%  bat %d%%", cpu, bat);
+                    else
+                      snprintf(buf, sizeof(buf), "cpu %.0f%%", cpu);
+                    lv_label_set_text(id(hdr_system), buf);
+
+                    bool acc = root["accessibility_ok"] | true;
+                    lv_label_set_text(id(hdr_warn), acc ? "" : "!");
+
+                    // Bordo di accento sugli slot la cui chiave di stato e'
+                    // veritiera. La chiave e' un percorso puntato dentro
+                    // questo stesso JSON, quindi non serve nessun round-trip.
+                    for (int i = 0; i < 12; i++) {
+                      const std::string &key = id(state_keys)[i];
+                      bool on = false;
+                      if (!key.empty()) {
+                        JsonVariantConst cur = root;
+                        size_t start = 0;
+                        while (true) {
+                          size_t dot = key.find('.', start);
+                          std::string part = (dot == std::string::npos)
+                            ? key.substr(start) : key.substr(start, dot - start);
+                          cur = cur[part];
+                          if (dot == std::string::npos) break;
+                          start = dot + 1;
+                        }
+                        on = cur.as<bool>();
+                      }
+                      lv_obj_set_style_border_width(imgs[i], on ? 3 : 0,
+                                                    LV_PART_MAIN);
+                      lv_obj_set_style_border_color(
+                        imgs[i], lv_color_hex(0x4A9EFF), LV_PART_MAIN);
+                    }
+
+                    // Il canale che serve per volume e brano trasporta anche
+                    // l'invalidazione della cache: nessun push da progettare.
+                    int v = root["layout_version"] | -1;
+                    if (v != id(layout_version)) {
+                      id(layout_version) = v;
+                      id(fetch_layout).execute();
+                    }
+                    return true;
+                  });
+          on_error:
+            then:
+              - lambda: |-
+                  id(fail_streak)++;
+                  if (id(fail_streak) >= 3) id(agent_online) = false;
+      - lvgl.label.update:
+          id: hdr_offline
+          # std::string esplicito: il ternario fra due letterali darebbe
+          # const char*, e ESPHome ci chiama .c_str() sopra.
+          text: !lambda |-
+            return std::string(id(agent_online) ? "" : "Mac non raggiungibile");
+
+  - id: change_page
+    mode: single
+    parameters:
+      delta: int
+    then:
+      - lambda: |-
+          int n = id(page_count);
+          if (n <= 0) n = 1;
+          id(current_page) = ((id(current_page) + delta) % n + n) % n;
+      - script.execute: fetch_layout
+
+  - id: press_slot
+    mode: parallel
+    max_runs: 4
+    parameters:
+      slot: int
+    then:
+      - http_request.post:
+          url: "http://${agent_host}:${agent_port}/press"
+          request_headers:
+            X-Deck-Token: !secret deck_token
+            Content-Type: application/json
+          json: |-
+            root["page"] = id(current_page);
+            root["slot"] = slot;
+
+interval:
+  - interval: 2s
+    then:
+      - script.execute: fetch_state
+
+# ------------------------------------------------------------------- LVGL
+
+lvgl:
+  displays: [main_display]
+  touchscreens: [main_touch]
+  bg_color: 0x12141A
+  on_idle:
+    timeout: 5min
+    then:
+      - light.turn_off: backlight
+      - lvgl.pause:
+  top_layer:
+    widgets:
+      - obj:
+          x: 0
+          y: 0
+          width: 320
+          height: 36
+          bg_color: 0x12141A
+          bg_opa: COVER
+          border_width: 0
+          pad_all: 0
+          radius: 0
+          widgets:
+            - label:
+                id: hdr_volume
+                x: 6
+                y: 10
+                text: "--"
+                text_color: 0xE8EAF0
+                text_font: font_hdr
+            - label:
+                id: hdr_media
+                x: 52
+                y: 10
+                width: 160
+                text: ""
+                text_color: 0x9AA3B2
+                text_font: font_hdr
+                long_mode: DOT
+            - label:
+                id: hdr_system
+                x: 216
+                y: 10
+                text: ""
+                text_color: 0x9AA3B2
+                text_font: font_hdr
+            - label:
+                id: hdr_warn
+                x: 306
+                y: 10
+                text: ""
+                text_color: 0xFFAA3C
+                text_font: font_hdr
+            - label:
+                id: hdr_offline
+                x: 0
+                y: 10
+                width: 320
+                text: ""
+                align: CENTER
+                text_color: 0xFF6B6B
+                text_font: font_hdr
+  pages:
+    - id: deck_page
+      widgets:
+        - image:
+            id: tile_img_0
+            src: tile_0
+            x: 4
+            y: 40
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 0
+        - image:
+            id: tile_img_1
+            src: tile_1
+            x: 109
+            y: 40
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 1
+        - image:
+            id: tile_img_2
+            src: tile_2
+            x: 214
+            y: 40
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 2
+        - image:
+            id: tile_img_3
+            src: tile_3
+            x: 4
+            y: 143
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 3
+        - image:
+            id: tile_img_4
+            src: tile_4
+            x: 109
+            y: 143
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 4
+        - image:
+            id: tile_img_5
+            src: tile_5
+            x: 214
+            y: 143
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 5
+        - image:
+            id: tile_img_6
+            src: tile_6
+            x: 4
+            y: 246
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 6
+        - image:
+            id: tile_img_7
+            src: tile_7
+            x: 109
+            y: 246
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 7
+        - image:
+            id: tile_img_8
+            src: tile_8
+            x: 214
+            y: 246
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 8
+        - image:
+            id: tile_img_9
+            src: tile_9
+            x: 4
+            y: 349
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 9
+        - image:
+            id: tile_img_10
+            src: tile_10
+            x: 109
+            y: 349
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 10
+        - image:
+            id: tile_img_11
+            src: tile_11
+            x: 214
+            y: 349
+            width: 101
+            height: 99
+            clickable: true
+            on_click:
+              then:
+                - script.execute:
+                    id: press_slot
+                    slot: 11
+        - button:
+            id: nav_prev
+            x: 4
+            y: 452
+            width: 60
+            height: 24
+            widgets:
+              - label:
+                  text: "<"
+                  align: CENTER
+                  text_font: font_nav
+            on_click:
+              then:
+                - script.execute:
+                    id: change_page
+                    delta: -1
+        - label:
+            id: nav_label
+            x: 70
+            y: 456
+            width: 180
+            text: "Pagina 1/1"
+            align: CENTER
+            text_color: 0x9AA3B2
+            text_font: font_nav
+        - button:
+            id: nav_next
+            x: 256
+            y: 452
+            width: 60
+            height: 24
+            widgets:
+              - label:
+                  text: ">"
+                  align: CENTER
+                  text_font: font_nav
+            on_click:
+              then:
+                - script.execute:
+                    id: change_page
+                    delta: 1

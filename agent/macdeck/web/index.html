@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacDeck — configurazione</title>
+<style>
+:root{
+  --bg:#0d0f14; --panel:#161a22; --panel2:#1e232d; --line:#2a3240;
+  --text:#e8eaf0; --dim:#9aa3b2; --accent:#4a9eff; --ok:#3ddc84;
+  --warn:#ffaa3c; --err:#ff6b6b;
+}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+     background:var(--bg);color:var(--text)}
+header{display:flex;align-items:center;gap:14px;padding:12px 18px;
+       border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.3px}
+header .sp{flex:1}
+button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);
+       border-radius:7px;padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:600}
+button.ghost{background:transparent}
+button:disabled{opacity:.45;cursor:default}
+.banner{padding:10px 18px;font-size:13px;display:none}
+.banner.show{display:block}
+.banner.err{background:#3a1a1a;color:#ffc9c9;border-bottom:1px solid #5a2a2a}
+.banner.warn{background:#3a2f18;color:#ffe0b0;border-bottom:1px solid #5a4a28}
+.banner.ok{background:#16321f;color:#c6f5d8;border-bottom:1px solid #245638}
+.banner code{background:#0006;padding:1px 5px;border-radius:4px;user-select:all}
+main{display:flex;gap:22px;padding:18px;align-items:flex-start;flex-wrap:wrap}
+.left{display:flex;flex-direction:column;gap:10px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center;max-width:340px}
+.tabs .tab{padding:5px 11px;border-radius:6px;border:1px solid var(--line);
+           background:var(--panel2);cursor:pointer;font-size:13px}
+.tabs .tab.on{border-color:var(--accent);color:var(--accent)}
+#screen{position:relative;width:320px;height:480px;border-radius:14px;
+        border:1px solid var(--line);overflow:hidden;flex:none;
+        box-shadow:0 8px 30px #0008}
+#screen .chrome{position:absolute;left:0;right:0;color:var(--dim);font-size:11px;
+                display:flex;align-items:center;padding:0 8px;gap:8px}
+#screen .hdr{top:0;height:36px;border-bottom:1px solid #0006}
+#screen .nav{bottom:0;height:28px;justify-content:center;border-top:1px solid #0006}
+.slot{position:absolute;border-radius:10px;overflow:hidden;cursor:pointer;
+      border:2px solid transparent}
+.slot img{display:block;width:100%;height:100%}
+.slot.empty{border:1px dashed #333d4d;background:#ffffff06}
+.slot.sel{border-color:var(--accent)}
+.slot.drag{opacity:.4}
+.slot .plus{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+            color:#3d4757;font-size:20px}
+.right{flex:1;min-width:340px;max-width:620px;display:flex;flex-direction:column;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px}
+.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
+         margin:0 0 12px}
+label{display:block;font-size:12px;color:var(--dim);margin:10px 0 4px}
+input,select,textarea{width:100%;font:inherit;color:var(--text);background:var(--panel2);
+       border:1px solid var(--line);border-radius:7px;padding:7px 9px}
+textarea{min-height:76px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.row{display:flex;gap:10px}.row>*{flex:1}
+.hint{font-size:11.5px;color:var(--dim);margin-top:4px}
+.actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;
+        max-height:230px;overflow:auto;margin-top:10px}
+.picker .it{border:1px solid var(--line);border-radius:8px;padding:6px;text-align:center;
+            cursor:pointer;background:var(--panel2);font-size:10.5px;color:var(--dim);
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.picker .it:hover{border-color:var(--accent)}
+.picker .it img{width:40px;height:40px;display:block;margin:0 auto 4px}
+.steps{display:flex;flex-direction:column;gap:8px}
+.step{border:1px solid var(--line);border-radius:8px;padding:9px;background:var(--panel2)}
+.step .top{display:flex;gap:8px;align-items:center}
+.step .top select{flex:1}
+.step .top button{padding:3px 8px;font-size:12px}
+.muted{color:var(--dim);font-size:13px}
+.pill{font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <h1>MacDeck</h1>
+  <span class="pill" id="ver">—</span>
+  <span class="pill" id="dirty" style="display:none">modifiche non salvate</span>
+  <span class="sp"></span>
+  <button class="ghost" id="reload">Ricarica</button>
+  <button class="primary" id="save" disabled>Salva</button>
+</header>
+
+<div class="banner err" id="bErr"></div>
+<div class="banner warn" id="bAcc"></div>
+<div class="banner ok" id="bOk"></div>
+
+<main>
+  <div class="left">
+    <div class="tabs" id="tabs"></div>
+    <div id="screen"></div>
+    <div class="muted" id="gridInfo"></div>
+  </div>
+
+  <div class="right">
+    <div class="card" id="slotCard">
+      <h2>Slot</h2>
+      <div id="slotBody"><p class="muted">Seleziona uno slot nell'anteprima.</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Pagina</h2>
+      <div class="row">
+        <div><label>Nome</label><input id="pgName"></div>
+        <div><label>Colonne</label><input id="pgCols" type="number" min="1" max="12"></div>
+        <div><label>Righe</label><input id="pgRows" type="number" min="1" max="12"></div>
+      </div>
+      <div class="hint">Colonne × righe non può superare 12: è il numero di widget
+        immagine che il firmware gestisce.</div>
+      <div class="actions">
+        <button id="pgAdd">Aggiungi pagina</button>
+        <button id="pgDel">Elimina pagina</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ---------------------------------------------------------------- geometria
+// Replica del calcolo di layout.py: il display e' 320x480 VERTICALE perche'
+// l'AXS15231B non supporta lo scambio degli assi.
+const DW=320, DH=480, HEADER=36, NAVBAR=28, GUT=4, MAX_SLOTS=12;
+
+function slotBoxes(grid){
+  const cols=grid.cols, rows=grid.rows;
+  const areaH = DH - HEADER - NAVBAR;
+  const w = Math.floor((DW - (cols+1)*GUT)/cols);
+  const h = Math.floor((areaH - (rows+1)*GUT)/rows);
+  const out={};
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++)
+    out[r*cols+c] = {x:GUT+c*(w+GUT), y:HEADER+GUT+r*(h+GUT), w, h};
+  return out;
+}
+const idxOf = (pos,grid) => pos[1]*grid.cols + pos[0];
+const posOf = (i,grid) => [i % grid.cols, Math.floor(i/grid.cols)];
+
+// ------------------------------------------------------------------ modello
+let cfg=null, model=null, token=null, version=0;
+let sel={page:0, index:null}, dirty=false, dragFrom=null;
+
+const ACTION_FIELDS = {
+  app:        [{k:'target', l:'App — nome, percorso o bundle id'}],
+  keys:       [{k:'keys', l:'Combinazione (es. cmd+shift+4)'},
+               {k:'to', l:'Invia a questa app (opzionale)'}],
+  text:       [{k:'text', l:'Testo da digitare'}],
+  url:        [{k:'url', l:'URL'}],
+  shell:      [{k:'cmd', l:'Comando'}, {k:'cwd', l:'Directory (opzionale)'}],
+  applescript:[{k:'script', l:'AppleScript', area:true}],
+  shortcut:   [{k:'name', l:'Nome della Shortcut di macOS'}],
+  volume:     [{k:'op', l:'Operazione', opts:['set','up','down','mute_toggle']},
+               {k:'value', l:'Valore 0-100 (solo con set)', num:true},
+               {k:'step', l:'Passo (con up/down)', num:true}],
+  media:      [{k:'op', l:'Operazione', opts:['play_pause','next','prev']}],
+  page:       [{k:'to', l:'Indice della pagina', num:true}],
+  delay:      [{k:'ms', l:'Millisecondi', num:true}],
+  noop:       [],
+  sequence:   'seq',
+};
+
+function gridOf(p){ return p.grid || model.grid; }
+function curPage(){ return model.pages[sel.page]; }
+function slotAt(p,i){ const g=gridOf(p); return p.slots.find(s=>idxOf(s.pos,g)===i); }
+
+function toRaw(res){
+  return {
+    schema:1, grid:res.grid, theme:res.theme,
+    pages: res.pages.map(p=>({
+      name:p.name, grid:p.grid,
+      slots: p.slots.map(s=>{
+        const o={pos:s.pos, label:s.label, icon:s.icon, action:s.action};
+        if(s.color) o.color=s.color;
+        if(s.state) o.state=s.state;
+        if(s.timeout_ms) o.timeout_ms=s.timeout_ms;
+        return o;
+      })
+    }))
+  };
+}
+
+function setDirty(v){
+  dirty=v;
+  document.getElementById('save').disabled=!v;
+  document.getElementById('dirty').style.display = v?'':'none';
+}
+
+function banner(id,msg){
+  const el=document.getElementById(id);
+  if(!msg){ el.classList.remove('show'); el.innerHTML=''; return; }
+  el.innerHTML=msg; el.classList.add('show');
+}
+
+// ------------------------------------------------------------------- carica
+async function load(){
+  const r = await fetch('/api/config');
+  cfg = await r.json();
+  token = cfg.token; version = cfg.version;
+  model = toRaw(cfg.resolved);
+  if(sel.page >= model.pages.length) sel.page=0;
+  sel.index=null;
+  setDirty(false);
+  banner('bErr', cfg.error ? '<b>layout.yaml non valido:</b> '+cfg.error+
+    ' — il deck sta usando l\'ultimo layout valido.' : '');
+  document.getElementById('ver').textContent='versione '+version;
+  render();
+  checkAccess();
+}
+
+async function checkAccess(){
+  try{
+    const r = await fetch('/state',{headers:{'X-Deck-Token':token}});
+    const s = await r.json();
+    if(s.accessibility_ok===false){
+      banner('bAcc', '<b>Permesso Accessibilità non concesso:</b> le azioni '+
+        '<code>keys</code> e <code>text</code> non funzioneranno, senza dare errore. '+
+        'Autorizza l\'interprete dell\'agent in Impostazioni di Sistema → Privacy e '+
+        'Sicurezza → Accessibilità. Da terminale: '+
+        '<code>open \'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility\'</code>');
+    } else banner('bAcc','');
+  }catch(e){ /* l'agent risponde comunque: nessun banner */ }
+}
+
+// ----------------------------------------------------------------- anteprima
+async function render(){
+  const p = curPage(), g = gridOf(p), boxes = slotBoxes(g);
+  document.getElementById('gridInfo').textContent =
+    `griglia ${g.cols}×${g.rows} — tile ${boxes[0].w}×${boxes[0].h} px`;
+
+  // schede pagina
+  const tabs=document.getElementById('tabs'); tabs.innerHTML='';
+  model.pages.forEach((pg,i)=>{
+    const t=document.createElement('div');
+    t.className='tab'+(i===sel.page?' on':''); t.textContent=pg.name;
+    t.onclick=()=>{ sel.page=i; sel.index=null; render(); };
+    tabs.appendChild(t);
+  });
+
+  const sc=document.getElementById('screen');
+  sc.style.background = model.theme.background;
+  sc.innerHTML =
+    '<div class="chrome hdr"><span>62%</span><span style="flex:1"></span>'+
+    '<span>cpu · bat</span></div>'+
+    `<div class="chrome nav">Pagina ${sel.page+1}/${model.pages.length}</div>`;
+
+  for(let i=0;i<g.cols*g.rows;i++){
+    const b=boxes[i], s=slotAt(p,i);
+    const el=document.createElement('div');
+    el.className='slot'+(s?'':' empty')+(sel.index===i?' sel':'');
+    el.style.cssText=`left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
+    el.draggable=!!s;
+    el.onclick=()=>{ sel.index=i; render(); };
+    el.ondragstart=()=>{ dragFrom=i; el.classList.add('drag'); };
+    el.ondragend=()=>el.classList.remove('drag');
+    el.ondragover=ev=>ev.preventDefault();
+    el.ondrop=ev=>{ ev.preventDefault(); moveSlot(dragFrom,i); };
+    if(s){
+      const img=document.createElement('img');
+      tilePreview(s,g).then(u=>{ if(u) img.src=u; });
+      el.appendChild(img);
+    } else el.innerHTML='<div class="plus">+</div>';
+    sc.appendChild(el);
+  }
+  renderSlotPanel();
+  const pg=curPage();
+  document.getElementById('pgName').value=pg.name;
+  document.getElementById('pgCols').value=gridOf(pg).cols;
+  document.getElementById('pgRows').value=gridOf(pg).rows;
+}
+
+// L'anteprima passa dal renderer del display: quello che vedi qui e'
+// letteralmente quello che apparira' sullo schermo.
+async function tilePreview(slot,grid){
+  try{
+    const r=await fetch('/api/tile-preview',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({grid, slot, theme:model.theme})});
+    if(!r.ok) return null;
+    return URL.createObjectURL(await r.blob());
+  }catch(e){ return null; }
+}
+
+function moveSlot(from,to){
+  if(from===null||from===to) return;
+  const p=curPage(), g=gridOf(p);
+  const a=slotAt(p,from), b=slotAt(p,to);
+  if(!a) return;
+  a.pos=posOf(to,g);
+  if(b) b.pos=posOf(from,g);
+  sel.index=to; setDirty(true); render();
+}
+
+// --------------------------------------------------------- pannello di slot
+function renderSlotPanel(){
+  const body=document.getElementById('slotBody');
+  if(sel.index===null){
+    body.innerHTML='<p class="muted">Seleziona uno slot nell\'anteprima.</p>';
+    return;
+  }
+  const p=curPage(), g=gridOf(p);
+  let s=slotAt(p,sel.index);
+  if(!s){
+    body.innerHTML='<p class="muted">Slot vuoto.</p>'+
+      '<div class="actions"><button id="mk">Crea pulsante qui</button></div>';
+    document.getElementById('mk').onclick=()=>{
+      p.slots.push({pos:posOf(sel.index,g), label:'Nuovo', icon:'text:?',
+                    action:{type:'noop'}});
+      setDirty(true); render();
+    };
+    return;
+  }
+  body.innerHTML=`
+    <div class="row">
+      <div><label>Etichetta</label><input id="fLabel"></div>
+      <div><label>Colore tile</label>
+        <div class="row"><input id="fColor" type="color" style="padding:2px">
+        <button class="ghost" id="fColorNo">Tema</button></div></div>
+    </div>
+    <label>Icona</label>
+    <div class="row"><input id="fIcon" placeholder="app:/Applications/Slack.app">
+      <button class="ghost" id="fFind" style="flex:0 0 auto">Cerca…</button></div>
+    <div class="hint">Schemi: <code>app:</code> percorso o nome · <code>mdi:</code>
+      nome del glifo · <code>file:</code> immagine · <code>emoji:</code> ·
+      <code>text:</code></div>
+    <div class="picker" id="pick" style="display:none"></div>
+    <label>Chiave di stato (opzionale)</label>
+    <input id="fState" placeholder="volume.muted">
+    <div class="hint">Percorso dentro il JSON di <code>/state</code>: se il valore è
+      vero il display disegna un bordo di accento.</div>
+    <label>Azione</label>
+    <select id="fType"></select>
+    <div id="fFields"></div>
+    <div class="actions">
+      <button id="bTest">Prova adesso</button>
+      <button id="bDel">Elimina pulsante</button>
+    </div>
+    <div class="hint" id="tOut"></div>`;
+
+  const q=id=>document.getElementById(id);
+  q('fLabel').value=s.label||'';
+  q('fIcon').value=s.icon||'';
+  q('fState').value=s.state||'';
+  q('fColor').value=s.color||model.theme.tile;
+  q('fLabel').oninput=e=>{s.label=e.target.value;setDirty(true);refreshTile();};
+  q('fIcon').oninput=e=>{s.icon=e.target.value;setDirty(true);refreshTile();};
+  q('fState').oninput=e=>{s.state=e.target.value||undefined;setDirty(true);};
+  q('fColor').oninput=e=>{s.color=e.target.value;setDirty(true);refreshTile();};
+  q('fColorNo').onclick=()=>{delete s.color;setDirty(true);render();};
+
+  const sel2=q('fType');
+  (cfg.action_types||[]).forEach(t=>{
+    const o=document.createElement('option');o.value=t;o.textContent=t;
+    if(s.action&&s.action.type===t)o.selected=true;sel2.appendChild(o);
+  });
+  sel2.onchange=()=>{s.action={type:sel2.value};setDirty(true);renderSlotPanel();};
+  renderFields(q('fFields'), s.action);
+
+  q('fFind').onclick=()=>openPicker(s);
+  q('bDel').onclick=()=>{
+    p.slots=p.slots.filter(x=>x!==s); sel.index=null; setDirty(true); render();
+  };
+  q('bTest').onclick=async()=>{
+    q('tOut').textContent='eseguo…';
+    const r=await fetch('/api/test',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(s.action)});
+    const j=await r.json();
+    q('tOut').innerHTML = j.ok
+      ? '<span style="color:var(--ok)">eseguita</span>'+(j.out?' — '+j.out:'')
+      : '<span style="color:var(--err)">errore: '+(j.error||'?')+'</span>';
+  };
+}
+
+function refreshTile(){
+  const p=curPage(), g=gridOf(p), s=slotAt(p,sel.index);
+  const el=document.querySelectorAll('#screen .slot')[sel.index];
+  if(!s||!el) return;
+  tilePreview(s,g).then(u=>{ const i=el.querySelector('img'); if(i&&u) i.src=u; });
+}
+
+function renderFields(host, action){
+  host.innerHTML='';
+  const spec=ACTION_FIELDS[action.type];
+  if(spec===undefined){
+    host.innerHTML='<div class="hint">Tipo sconosciuto a questa GUI: i campi '+
+      'vanno scritti a mano in layout.yaml.</div>';
+    return;
+  }
+  if(spec==='seq'){ renderSequence(host, action); return; }
+  spec.forEach(f=>{
+    const lab=document.createElement('label'); lab.textContent=f.l; host.appendChild(lab);
+    let inp;
+    if(f.opts){
+      inp=document.createElement('select');
+      f.opts.forEach(o=>{const e=document.createElement('option');
+        e.value=o;e.textContent=o;if(action[f.k]===o)e.selected=true;inp.appendChild(e);});
+    }else{
+      inp=document.createElement(f.area?'textarea':'input');
+      if(f.num)inp.type='number';
+      inp.value=action[f.k]!==undefined?action[f.k]:'';
+    }
+    inp.oninput=()=>{
+      const v=inp.value;
+      if(v===''){delete action[f.k];}
+      else action[f.k]= f.num? Number(v): v;
+      setDirty(true);
+    };
+    if(inp.tagName==='SELECT') inp.onchange=inp.oninput;
+    host.appendChild(inp);
+  });
+}
+
+function renderSequence(host, action){
+  action.steps = action.steps||[];
+  const wrap=document.createElement('div'); wrap.className='steps';
+  action.steps.forEach((st,i)=>{
+    const d=document.createElement('div'); d.className='step';
+    const top=document.createElement('div'); top.className='top';
+    const s2=document.createElement('select');
+    (cfg.action_types||[]).forEach(t=>{const o=document.createElement('option');
+      o.value=t;o.textContent=t;if(st.type===t)o.selected=true;s2.appendChild(o);});
+    s2.onchange=()=>{action.steps[i]={type:s2.value};setDirty(true);renderSequence(host,action);};
+    const up=document.createElement('button');up.textContent='↑';
+    up.onclick=()=>{if(i>0){const a=action.steps;[a[i-1],a[i]]=[a[i],a[i-1]];
+      setDirty(true);renderSequence(host,action);}};
+    const dn=document.createElement('button');dn.textContent='↓';
+    dn.onclick=()=>{const a=action.steps;if(i<a.length-1){[a[i+1],a[i]]=[a[i],a[i+1]];
+      setDirty(true);renderSequence(host,action);}};
+    const rm=document.createElement('button');rm.textContent='×';
+    rm.onclick=()=>{action.steps.splice(i,1);setDirty(true);renderSequence(host,action);};
+    top.append(document.createTextNode((i+1)+'.'),s2,up,dn,rm);
+    d.appendChild(top);
+    const f=document.createElement('div'); renderFields(f,st); d.appendChild(f);
+    wrap.appendChild(d);
+  });
+  host.innerHTML=''; host.appendChild(wrap);
+  const add=document.createElement('button'); add.textContent='Aggiungi passo';
+  add.style.marginTop='10px';
+  add.onclick=()=>{action.steps.push({type:'keys'});setDirty(true);renderSequence(host,action);};
+  host.appendChild(add);
+}
+
+// ------------------------------------------------------------ scelta icona
+async function openPicker(slot){
+  const pick=document.getElementById('pick');
+  pick.style.display=''; pick.innerHTML='<div class="hint">cerco…</div>';
+  const q=(document.getElementById('fIcon').value||'').replace(/^[a-z]+:/,'');
+  const r=await fetch('/api/icons?q='+encodeURIComponent(q));
+  const j=await r.json();
+  pick.innerHTML='';
+  const add=(spec,name)=>{
+    const it=document.createElement('div'); it.className='it'; it.title=spec;
+    const img=document.createElement('img');
+    img.src='/api/icon-preview?spec='+encodeURIComponent(spec)+'&size=48';
+    it.appendChild(img);
+    it.appendChild(document.createTextNode(name));
+    it.onclick=()=>{ slot.icon=spec; document.getElementById('fIcon').value=spec;
+      setDirty(true); pick.style.display='none'; render(); };
+    pick.appendChild(it);
+  };
+  (j.apps||[]).forEach(a=>add(a.icon,a.name));
+  (j.mdi||[]).forEach(n=>add('mdi:'+n,n));
+  if(!pick.children.length)
+    pick.innerHTML='<div class="hint">Nessun risultato.'+
+      (j.mdi_available?'':' Il font MDI non è installato: esegui <code>macdeck fetch-fonts</code>.')+
+      '</div>';
+}
+
+// ---------------------------------------------------------------- pagine
+document.getElementById('pgName').oninput=e=>{curPage().name=e.target.value;setDirty(true);render();};
+function setGrid(){
+  const c=+document.getElementById('pgCols').value, r=+document.getElementById('pgRows').value;
+  if(!(c>0&&r>0)) return;
+  if(c*r>MAX_SLOTS){
+    banner('bErr',`Una griglia ${c}×${r} fa ${c*r} slot: il firmware ne gestisce ${MAX_SLOTS}.`);
+    return;
+  }
+  banner('bErr','');
+  const p=curPage(); p.grid={cols:c,rows:r};
+  p.slots=p.slots.filter(s=>s.pos[0]<c&&s.pos[1]<r);
+  sel.index=null; setDirty(true); render();
+}
+document.getElementById('pgCols').onchange=setGrid;
+document.getElementById('pgRows').onchange=setGrid;
+document.getElementById('pgAdd').onclick=()=>{
+  model.pages.push({name:'Pagina '+(model.pages.length+1),
+                    grid:{...model.grid}, slots:[]});
+  sel.page=model.pages.length-1; sel.index=null; setDirty(true); render();
+};
+document.getElementById('pgDel').onclick=()=>{
+  if(model.pages.length<2){ banner('bErr','Deve restare almeno una pagina.'); return; }
+  model.pages.splice(sel.page,1); sel.page=0; sel.index=null; setDirty(true); render();
+};
+
+// ---------------------------------------------------------------- salva
+document.getElementById('save').onclick=async()=>{
+  banner('bErr',''); banner('bOk','');
+  const r=await fetch('/api/config',{method:'PUT',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(model)});
+  const j=await r.json();
+  if(!r.ok){ banner('bErr','<b>Non salvato:</b> '+(j.detail||r.status)); return; }
+  version=j.version; setDirty(false);
+  document.getElementById('ver').textContent='versione '+version;
+  banner('bOk','Salvato. Il display si aggiorna al prossimo ciclo di polling, entro 2 secondi.');
+  setTimeout(()=>banner('bOk',''),4000);
+  render();
+};
+document.getElementById('reload').onclick=load;
+window.addEventListener('beforeunload',e=>{ if(dirty){e.preventDefault();e.returnValue='';} });
+
+load();
+</script>
+</body>
+</html>

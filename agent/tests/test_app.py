@@ -15,10 +15,30 @@ AUTH = {"X-Deck-Token": TOKEN}
 LOCAL = {"X-Forwarded-Loopback": "1"}
 
 
+# I test dell'API non devono dipendere dal contenuto di DEFAULT_LAYOUT:
+# altrimenti cambiare le app predefinite rompe i test del protocollo.
+LAYOUT_DI_PROVA = {
+    "pages": [
+        {
+            "name": "Prova",
+            "slots": [
+                {"pos": [0, 0], "label": "Uno", "icon": "text:1",
+                 "action": {"type": "app", "target": "Finder"}},
+                {"pos": [1, 0], "label": "Due", "icon": "text:2",
+                 "action": {"type": "volume", "op": "mute_toggle"},
+                 "state": "volume.muted"},
+            ],
+        },
+        {"name": "Vuota", "slots": []},
+    ]
+}
+
+
 @pytest.fixture
 def ctx(tmp_path, fake_ex):
     store = L.LayoutStore(tmp_path / "layout.yaml")
     store.load()
+    store.save(LAYOUT_DI_PROVA)
     probe = StateProbe(fake_ex, ttl=0.0)
     app = create_app(
         store=store, cache=TileCache(), probe=probe,
@@ -40,7 +60,7 @@ def test_layout_espone_geometria_e_url_per_ogni_slot(ctx):
     body = client.get("/layout", headers=AUTH).json()
     assert body["version"] == store.version
     assert body["page"] == 0
-    assert body["pages"] == ["Home"]
+    assert body["pages"] == ["Prova", "Vuota"]
     slot = body["slots"][0]
     assert {"i", "x", "y", "w", "h", "url"} <= set(slot)
     assert slot["url"].startswith("/tile/0/")
@@ -49,6 +69,7 @@ def test_layout_espone_geometria_e_url_per_ogni_slot(ctx):
 def test_layout_pagina_inesistente(ctx):
     client, *_ = ctx
     assert client.get("/layout?page=99", headers=AUTH).status_code == 404
+    assert client.get("/layout?page=1", headers=AUTH).status_code == 200
 
 
 def test_tile_restituisce_un_png_della_dimensione_giusta(ctx):
@@ -57,12 +78,12 @@ def test_tile_restituisce_un_png_della_dimensione_giusta(ctx):
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (115, 80)
+        assert im.size == (101, 99)
 
 
 def test_tile_di_uno_slot_vuoto(ctx):
     client, *_ = ctx
-    assert client.get("/tile/0/7.png", headers=AUTH).status_code == 404
+    assert client.get("/tile/0/5.png", headers=AUTH).status_code == 404
 
 
 def test_press_esegue_lazione_sincrona(ctx):
@@ -82,7 +103,7 @@ def test_press_riporta_lerrore_di_unazione_sincrona(ctx):
 
 def test_press_su_slot_vuoto(ctx):
     client, *_ = ctx
-    r = client.post("/press", json={"page": 0, "slot": 7}, headers=AUTH)
+    r = client.post("/press", json={"page": 0, "slot": 5}, headers=AUTH)
     assert r.status_code == 404
 
 
@@ -102,6 +123,14 @@ def test_state_ha_le_chiavi_attese_e_la_versione(ctx):
     assert body["layout_version"] == store.version
     for k in ("volume", "media", "system", "accessibility_ok", "last_error"):
         assert k in body
+
+
+def test_layout_espone_la_chiave_di_stato_dichiarata(ctx):
+    client, *_ = ctx
+    slots = client.get("/layout", headers=AUTH).json()["slots"]
+    per_indice = {s["i"]: s for s in slots}
+    assert per_indice[1]["state"] == "volume.muted"
+    assert per_indice[0]["state"] is None
 
 
 def test_state_riporta_lerrore_di_layout(ctx):
@@ -160,3 +189,71 @@ def test_salvataggio_svuota_la_cache_delle_tile(ctx):
     client.put("/api/config", json={"pages": [{"name": "X", "slots": []}]},
                headers=LOCAL)
     assert client.get("/tile/0/0.png", headers=AUTH).status_code == 404
+
+
+def test_api_icons_include_i_glifi_mdi(ctx, tmp_path):
+    client, *_ = ctx
+    body = client.get("/api/icons?q=volume", headers=LOCAL).json()
+    assert "mdi" in body and "mdi_total" in body
+    # senza font MDI installato nella root di prova la lista e' vuota, ma la
+    # chiave deve esistere comunque perche' la GUI non deve gestire assenze
+    assert isinstance(body["mdi"], list)
+
+
+def test_icon_preview_rende_un_png(ctx):
+    client, *_ = ctx
+    r = client.get("/api/icon-preview?spec=text:AB&size=48", headers=LOCAL)
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (48, 48)
+
+
+def test_icon_preview_su_spec_rotta_da_il_ripiego_non_un_errore(ctx):
+    client, *_ = ctx
+    r = client.get("/api/icon-preview?spec=boh:niente", headers=LOCAL)
+    assert r.status_code == 200
+
+
+def test_icon_preview_limita_la_dimensione(ctx):
+    client, *_ = ctx
+    r = client.get("/api/icon-preview?spec=text:X&size=9999", headers=LOCAL)
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (256, 256)
+
+
+def test_icon_preview_e_solo_loopback(ctx):
+    client, *_ = ctx
+    assert client.get("/api/icon-preview?spec=text:X").status_code == 403
+
+
+def test_tile_preview_rende_una_tile_non_salvata(ctx, tmp_path):
+    client, store, *_ = ctx
+    prima = store.version
+    r = client.post("/api/tile-preview", headers=LOCAL, json={
+        "grid": {"cols": 3, "rows": 4},
+        "slot": {"pos": [1, 1], "label": "Bozza", "icon": "text:B"},
+    })
+    assert r.status_code == 200
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (101, 99)
+    assert store.version == prima          # l'anteprima non salva nulla
+
+
+def test_tile_preview_rispetta_la_griglia_richiesta(ctx):
+    client, *_ = ctx
+    r = client.post("/api/tile-preview", headers=LOCAL, json={
+        "grid": {"cols": 2, "rows": 2},
+        "slot": {"pos": [0, 0], "label": "Grande", "icon": "text:G"},
+    })
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (154, 202)
+
+
+def test_tile_preview_rifiuta_una_griglia_impossibile(ctx):
+    client, *_ = ctx
+    r = client.post("/api/tile-preview", headers=LOCAL, json={
+        "grid": {"cols": 9, "rows": 9},
+        "slot": {"pos": [0, 0], "label": "X", "icon": "text:X"},
+    })
+    assert r.status_code == 422

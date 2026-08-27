@@ -1,5 +1,10 @@
 """Il layout e' la sorgente di verita' del deck.
 
+Il display e' 320x480 VERTICALE: l'AXS15231B non supporta lo scambio degli
+assi (`swap_xy` e' UNDEFINED nel preset di ESPHome), quindi il landscape non
+e' ottenibile via transform. La griglia di default e' 3x4, che in verticale
+da' tile quasi quadrate da 101x99.
+
 Due proprieta' che i test bloccano deliberatamente:
 
 - la geometria delle tile si calcola qui, non nel firmware, perche' e' il Mac
@@ -18,14 +23,14 @@ import yaml
 
 from .actions import known_types
 
-DISPLAY_W = 480
-DISPLAY_H = 320
+DISPLAY_W = 320
+DISPLAY_H = 480
 HEADER_H = 36
 NAVBAR_H = 28
 GUTTER = 4
 MAX_SLOTS = 12
 
-DEFAULT_GRID: dict[str, int] = {"cols": 4, "rows": 3}
+DEFAULT_GRID: dict[str, int] = {"cols": 3, "rows": 4}
 
 DEFAULT_THEME: dict[str, str] = {
     "background": "#12141A",
@@ -52,28 +57,29 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                 {"pos": [2, 0], "label": "iTerm",
                  "icon": "app:/Applications/iTerm.app",
                  "action": {"type": "app", "target": "iTerm"}},
-                {"pos": [3, 0], "label": "Sourcetree",
+                {"pos": [0, 1], "label": "Sourcetree",
                  "icon": "app:/Applications/Sourcetree.app",
                  "action": {"type": "app", "target": "Sourcetree"}},
-                {"pos": [0, 1], "label": "Chrome",
+                {"pos": [1, 1], "label": "Chrome",
                  "icon": "app:/Applications/Google Chrome.app",
                  "action": {"type": "app", "target": "Google Chrome"}},
-                {"pos": [1, 1], "label": "Postman",
+                {"pos": [2, 1], "label": "Postman",
                  "icon": "app:/Applications/Postman.app",
                  "action": {"type": "app", "target": "Postman"}},
-                {"pos": [2, 1], "label": "Docker",
+                {"pos": [0, 2], "label": "Docker",
                  "icon": "app:/Applications/Docker.app",
                  "action": {"type": "app", "target": "Docker"}},
-                {"pos": [3, 1], "label": "Slack",
+                {"pos": [1, 2], "label": "Slack",
                  "icon": "app:/Applications/Slack.app",
                  "action": {"type": "app", "target": "Slack"}},
-                {"pos": [0, 2], "label": "Screenshot", "icon": "mdi:camera",
+                {"pos": [2, 2], "label": "Screenshot", "icon": "mdi:camera",
                  "action": {"type": "keys", "keys": "cmd+shift+4"}},
-                {"pos": [1, 2], "label": "Mission\nControl", "icon": "mdi:view-dashboard",
+                {"pos": [0, 3], "label": "Mission\nControl",
+                 "icon": "mdi:view-dashboard",
                  "action": {"type": "keys", "keys": "ctrl+up"}},
-                {"pos": [2, 2], "label": "Spotlight", "icon": "mdi:magnify",
+                {"pos": [1, 3], "label": "Spotlight", "icon": "mdi:magnify",
                  "action": {"type": "keys", "keys": "cmd+space"}},
-                {"pos": [3, 2], "label": "Blocca", "icon": "mdi:lock",
+                {"pos": [2, 3], "label": "Blocca", "icon": "mdi:lock",
                  "action": {"type": "keys", "keys": "ctrl+cmd+q"}},
             ],
         },
@@ -102,16 +108,20 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                 {"pos": [0, 0], "label": "Home\nAssistant",
                  "icon": "app:/Applications/Home Assistant.app",
                  "action": {"type": "app", "target": "Home Assistant"}},
-                {"pos": [1, 0], "label": "Plancia",
-                 "icon": "mdi:tablet-dashboard",
-                 "action": {"type": "url",
-                            "url": "http://test-plancia.local"}},
+                {"pos": [1, 0], "label": "Plancia", "icon": "mdi:tablet-dashboard",
+                 "action": {"type": "url", "url": "http://test-plancia.local"}},
                 {"pos": [2, 0], "label": "Spotify",
                  "icon": "app:/Applications/Spotify.app",
                  "action": {"type": "app", "target": "Spotify"}},
-                {"pos": [3, 0], "label": "Telegram",
+                {"pos": [0, 1], "label": "Telegram",
                  "icon": "app:/Applications/Telegram.app",
                  "action": {"type": "app", "target": "Telegram"}},
+                {"pos": [1, 1], "label": "WhatsApp",
+                 "icon": "app:/Applications/WhatsApp.app",
+                 "action": {"type": "app", "target": "WhatsApp"}},
+                {"pos": [2, 1], "label": "VLC",
+                 "icon": "app:/Applications/VLC.app",
+                 "action": {"type": "app", "target": "VLC"}},
             ],
         },
     ],
@@ -143,6 +153,11 @@ def slot_boxes(grid: dict) -> dict[int, dict]:
 def slot_index(pos: list[int], grid: dict) -> int:
     col, row = int(pos[0]), int(pos[1])
     return row * int(grid["cols"]) + col
+
+
+def normalize_grid(grid: dict, where: str = "griglia") -> dict:
+    """Valida e normalizza una griglia. Pubblica: la usa anche l'anteprima."""
+    return _check_grid(grid, where)
 
 
 def _check_grid(grid: dict, where: str) -> dict:

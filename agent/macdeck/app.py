@@ -22,7 +22,7 @@ import yaml
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from . import actions, icons
+from . import actions, icons, render
 from . import layout as L
 from .executor import Executor
 from .layout import LayoutStore
@@ -192,10 +192,51 @@ def create_app(
                     continue
                 seen.add(name)
                 apps.append({"name": name, "icon": f"app:{bundle}"})
+        mdi = [n for n in icons.mdi_names(root) if not needle or needle in n]
         return {
             "apps": apps[:120],
+            "mdi": mdi[:120],
+            "mdi_total": len(mdi),
             "action_types": sorted(actions.known_types()),
             "mdi_available": icons.mdi_available(root),
         }
+
+    @app.post("/api/tile-preview", dependencies=[Depends(require_local)])
+    def tile_preview(body: dict) -> Response:
+        """Rende una tile NON ancora salvata, esattamente come apparira'.
+
+        E' cio' che rende la web UI davvero WYSIWYG: l'anteprima passa dallo
+        stesso renderer del display, non da un'approssimazione in CSS.
+        """
+        try:
+            grid = L.normalize_grid(body.get("grid") or store.layout["grid"])
+        except L.LayoutError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        slot = dict(body.get("slot") or {})
+        pos = slot.get("pos") or [0, 0]
+        boxes = L.slot_boxes(grid)
+        index = L.slot_index(pos, grid)
+        slot["box"] = boxes.get(index) or next(iter(boxes.values()))
+        theme = {**store.layout["theme"], **(body.get("theme") or {})}
+        return Response(
+            content=render.tile_png(slot, theme, root=root),
+            media_type="image/png",
+        )
+
+    @app.get("/api/icon-preview", dependencies=[Depends(require_local)])
+    def icon_preview(spec: str, size: int = 64) -> Response:
+        """Rende una qualunque icon spec come PNG.
+
+        Serve al selettore di icone della web UI: senza questo endpoint la
+        GUI mostrerebbe nomi di file invece delle icone, e sceglierebbe alla
+        cieca.
+        """
+        import io
+
+        size = max(16, min(size, 256))
+        im = icons.resolve(spec, size, root=root)
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+        return Response(content=buf.getvalue(), media_type="image/png")
 
     return app

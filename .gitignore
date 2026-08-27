@@ -5,6 +5,7 @@ firmware/secrets.yaml
 firmware/.esphome/
 agent/.pytest_cache/
 .DS_Store
+firmware/.esphome/
 
 # firmware di fabbrica: backup locale, non si ridistribuisce
 /backup/

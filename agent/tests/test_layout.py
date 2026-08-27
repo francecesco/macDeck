@@ -7,23 +7,23 @@ from macdeck import layout as L
 def test_geometria_della_griglia_di_default():
     boxes = L.slot_boxes(L.DEFAULT_GRID)
     assert len(boxes) == 12
-    assert boxes[0] == {"x": 4, "y": 40, "w": 115, "h": 80}
+    assert boxes[0] == {"x": 4, "y": 40, "w": 101, "h": 99}
     last = boxes[11]
     assert last["x"] + last["w"] <= L.DISPLAY_W
     assert last["y"] + last["h"] <= L.DISPLAY_H - L.NAVBAR_H
 
 
-def test_griglia_piu_larga_da_tile_piu_grandi():
-    boxes = L.slot_boxes({"cols": 3, "rows": 2})
-    assert len(boxes) == 6
-    assert boxes[0]["w"] > 115
-    assert boxes[0]["h"] > 80
+def test_griglia_piu_rada_da_tile_piu_grandi():
+    boxes = L.slot_boxes({"cols": 2, "rows": 2})
+    assert len(boxes) == 4
+    assert boxes[0]["w"] > 101
+    assert boxes[0]["h"] > 99
 
 
 def test_slot_index_e_riga_per_colonne_piu_colonna():
-    assert L.slot_index([0, 0], {"cols": 4, "rows": 3}) == 0
-    assert L.slot_index([3, 0], {"cols": 4, "rows": 3}) == 3
-    assert L.slot_index([1, 2], {"cols": 4, "rows": 3}) == 9
+    assert L.slot_index([0, 0], {"cols": 3, "rows": 4}) == 0
+    assert L.slot_index([2, 0], {"cols": 3, "rows": 4}) == 2
+    assert L.slot_index([1, 2], {"cols": 3, "rows": 4}) == 7
 
 
 def test_layout_di_default_e_valido():
@@ -46,7 +46,7 @@ def test_validate_calcola_geometria_e_indice_per_ogni_slot():
     })
     slot = out["pages"][0]["slots"][0]
     assert slot["index"] == 1
-    assert slot["box"] == {"x": 123, "y": 40, "w": 115, "h": 80}
+    assert slot["box"] == {"x": 109, "y": 40, "w": 101, "h": 99}
 
 
 @pytest.mark.parametrize("raw,atteso", [
@@ -54,7 +54,7 @@ def test_validate_calcola_geometria_e_indice_per_ogni_slot():
     ({"pages": []}, "almeno una pagina"),
     ({"pages": [{"slots": []}]}, "name"),
     ({"grid": {"cols": 9, "rows": 9}, "pages": [{"name": "X", "slots": []}]}, "12"),
-    ({"pages": [{"name": "X", "slots": [{"pos": [9, 0], "label": "A",
+    ({"pages": [{"name": "X", "slots": [{"pos": [5, 0], "label": "A",
       "icon": "text:A", "action": {"type": "noop"}}]}]}, "fuori dalla griglia"),
     ({"pages": [{"name": "X", "slots": [
         {"pos": [0, 0], "label": "A", "icon": "text:A", "action": {"type": "noop"}},
