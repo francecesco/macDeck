@@ -134,7 +134,7 @@ Poiché `x`, `y`, `width` e `height` sono proprietà di stile LVGL aggiornabili 
 runtime, il firmware non ha nemmeno la griglia compilata: riceve per ogni slot
 posizione e dimensione. Ne segue che **griglia e dimensione delle tile sono
 configurabili dal Mac** — una pagina 4×3 con tile da 115×80 e una pagina 3×2 con
-tile da 156×124 convivono senza toccare il firmware.
+tile da 154×122 convivono senza toccare il firmware.
 
 Costo accettato: con la griglia di default (4×3, tile 115×80) sono 12 × 115×80 ×
 2 byte (RGB565) ≈ 220 KB di PSRAM su 8 MB disponibili, e 12 GET HTTP al boot,
