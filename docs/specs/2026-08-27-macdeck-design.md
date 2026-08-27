@@ -73,6 +73,9 @@ differenza importante rispetto al progetto `plancia-ingresso`, che ha richiesto
 - `touchscreen: platform: axs15231` (I²C `0x3B`, update interval 50 ms)
 - `online_image` con `format: PNG` e azione `set_url` templatabile a runtime
 - `http_request` con `capture_response` e `on_response`
+- `lvgl.widget.update` accetta `x`, `y`, `width`, `height` (sono in `BASE_PROPS`,
+  quindi proprietà di stile aggiornabili a runtime) — è ciò che permette di far
+  decidere al Mac anche la **geometria**, non solo il contenuto
 
 Il backlight **non** è gestito dal preset: va dichiarato come `output: ledc` su
 GPIO1 più `light: monochromatic`. Scelta deliberata — dà dimmerazione e
@@ -113,8 +116,8 @@ che al tocco va detto all'agent. Tutta la conoscenza del mondo sta in
 ### 3.1 Le tile sono renderizzate sul Mac
 
 **Decisione centrale del design.** L'agent non manda al display "etichetta +
-nome icona": manda l'**immagine finita della tile**, 115×80 px, icona e testo
-già composti da Pillow.
+nome icona": manda l'**immagine finita della tile** — icona e testo già composti da Pillow — e
+insieme le sue coordinate.
 
 Motivazioni:
 
@@ -127,8 +130,16 @@ Motivazioni:
 - Tipografia, colori, badge, barre di stato sulla tile diventano codice Python
   modificabile a caldo.
 
-Costo accettato: 12 tile × 115×80 × 2 byte (RGB565) ≈ 220 KB di PSRAM, su 8 MB
-disponibili. E 12 GET HTTP al boot, ~1-2 s sulla LAN.
+Poiché `x`, `y`, `width` e `height` sono proprietà di stile LVGL aggiornabili a
+runtime, il firmware non ha nemmeno la griglia compilata: riceve per ogni slot
+posizione e dimensione. Ne segue che **griglia e dimensione delle tile sono
+configurabili dal Mac** — una pagina 4×3 con tile da 115×80 e una pagina 3×2 con
+tile da 156×124 convivono senza toccare il firmware.
+
+Costo accettato: con la griglia di default (4×3, tile 115×80) sono 12 × 115×80 ×
+2 byte (RGB565) ≈ 220 KB di PSRAM su 8 MB disponibili, e 12 GET HTTP al boot,
+~1-2 s sulla LAN. Una griglia più larga usa meno tile ma più grandi: il totale
+resta nell'ordine dei 250 KB perché copre sempre la stessa area di schermo.
 
 L'header di stato (ora, volume, brano, CPU) usa invece un font LVGL compilato
 nel firmware, perché cambia ogni 2 s e re-renderizzarlo come PNG sarebbe
@@ -139,8 +150,8 @@ dei brani.
 
 | Endpoint | Chi chiama | Quando | Cosa fa |
 |---|---|---|---|
-| `GET /layout?page=N` | display | boot, cambio versione | JSON: per ogni slot posizione, url tile, se è vuoto |
-| `GET /tile/{page}/{slot}.png` | display | dopo `/layout` | PNG 115×80 RGB, renderizzato e cacheato |
+| `GET /layout?page=N` | display | boot, cambio versione | JSON: numero di pagine, e per ogni slot `x`/`y`/`w`/`h`, url della tile, chiave di stato |
+| `GET /tile/{page}/{slot}.png` | display | dopo `/layout` | PNG RGB della tile, dimensione derivata dalla griglia, renderizzato e cacheato |
 | `POST /press` | display | al tocco | `{"page":1,"slot":5}` → esegue, risponde `{"ok":true}` |
 | `GET /state` | display | polling 2 s | volume, mute, brano, CPU, RAM, batteria, **`layout_version`** |
 | `GET /` | browser | configurazione | web UI |
@@ -232,7 +243,7 @@ pages:
         state: volume.muted                      # opzionale: illumina la tile
 
   - name: Media
-    grid: {cols: 3, rows: 2}                     # override per pagina
+    grid: {cols: 3, rows: 2}                     # tile piu' grandi, solo per questa pagina
     slots: []
 ```
 
@@ -320,6 +331,10 @@ Il TTF di MDI viene scaricato una volta in `~/.config/macdeck/fonts/`.
 └───────────────────────────────────────────┘
 ```
 
+Questa è la griglia **di default**, non un vincolo del firmware: 4×3 su un'area
+di 480×256 con gutter da 4 px dà tile di 115×80. `layout.yaml` può dichiarare una
+griglia diversa, per pagina, e il renderer ricalcola le dimensioni.
+
 `transform: swap_xy` per il landscape. Il touchscreen richiede la stessa
 trasformazione, altrimenti gli assi risultano scambiati.
 
@@ -327,8 +342,9 @@ Le pagine sono **illimitate**: la navbar mostra frecce e indicatori, il firmware
 non ha un numero di pagine compilato. Cambio pagina gestito localmente in LVGL
 (nessun round-trip), poi le tile della nuova pagina si caricano da `/layout`.
 
-Gli slot vuoti sono tile trasparenti non toccabili — il firmware ne ha sempre 12,
-`layout.yaml` decide quanti sono visibili.
+Il firmware ha **12 widget immagine** riutilizzati per qualunque griglia: riceve
+per ognuno `x`/`y`/`width`/`height`/`src` e nasconde quelli in eccesso. Dodici è
+il tetto al numero di slot per pagina, non la forma della griglia.
 
 Backlight: `light: monochromatic` su LEDC GPIO1, spegnimento dopo 5 min di
 inattività, riaccensione al tocco (il primo tocco a schermo spento accende e
