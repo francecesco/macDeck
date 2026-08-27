@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+firmware/secrets.yaml
+firmware/.esphome/
+agent/.pytest_cache/
+.DS_Store
+
+# firmware di fabbrica: backup locale, non si ridistribuisce
+/backup/
