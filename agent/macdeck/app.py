@@ -14,6 +14,7 @@ resta uno.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -27,7 +28,7 @@ from . import layout as L
 from .executor import Executor
 from .layout import LayoutStore
 from .render import TileCache
-from .state import StateProbe
+from .state import StateProbe, value_at
 
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -60,8 +61,42 @@ def create_app(
             return
         raise HTTPException(status_code=403, detail="solo da localhost")
 
-    def _page(index: int) -> dict:
+    def _visible_pages() -> list[dict]:
+        """Le pagine effettivamente mostrate adesso.
+
+        Una pagina con `when:` compare solo se quel percorso dentro /state e'
+        veritiero: e' cosi' che i comandi multimediali appaiono soltanto
+        quando c'e' davvero un player in esecuzione. Se il filtro non lascia
+        nulla si mostra tutto, perche' un deck vuoto e' peggio di un deck
+        con una pagina di troppo.
+        """
+        stato = probe.snapshot()
         pages = store.layout["pages"]
+        visibili = [
+            p for p in pages
+            if not p.get("when") or bool(value_at(stato, p["when"]))
+        ]
+        return visibili or pages
+
+    def _effective_version(visibili: list[dict]) -> int:
+        """Cambia sia quando cambia il layout sia quando cambia cosa e' visibile.
+
+        Senza il secondo pezzo, l'apparire della pagina Media non farebbe
+        ricaricare il display.
+
+        NON si usa hash() di Python: il suo hash delle stringhe e'
+        randomizzato a ogni processo, quindi la versione cambierebbe a ogni
+        riavvio dell'agent anche a layout identico — esattamente il difetto
+        che content_version() serviva a togliere.
+        """
+        nomi = "|".join(p["name"] for p in visibili)
+        marchio = int(
+            hashlib.sha256(nomi.encode()).hexdigest()[:8], 16
+        )
+        return (store.version ^ marchio) & 0x7FFFFFFF
+
+    def _page(index: int) -> dict:
+        pages = _visible_pages()
         if not 0 <= index < len(pages):
             raise HTTPException(status_code=404, detail=f"pagina {index} inesistente")
         return pages[index]
@@ -80,16 +115,18 @@ def create_app(
 
     @app.get("/layout", dependencies=[Depends(require_token)])
     def get_layout(page: int = 0) -> dict:
+        visibili = _visible_pages()
         p = _page(page)
         theme = store.layout["theme"]
+        version = _effective_version(visibili)
         return {
-            "version": store.version,
+            "version": version,
             "page": page,
-            "pages": [q["name"] for q in store.layout["pages"]],
+            "pages": [q["name"] for q in visibili],
             "grid": p["grid"],
             "background": theme["background"],
             "accent": theme["accent"],
-            "screen": f"/screen/{page}.png?v={store.version}",
+            "screen": f"/screen/{page}.png?v={version}",
             "slots": [
                 {
                     "i": s["index"],
@@ -97,7 +134,7 @@ def create_app(
                     "y": s["box"]["y"],
                     "w": s["box"]["w"],
                     "h": s["box"]["h"],
-                    "url": f"/tile/{page}/{s['index']}.png?v={store.version}",
+                    "url": f"/tile/{page}/{s['index']}.png?v={version}",
                     "state": s.get("state"),
                 }
                 for s in p["slots"]
@@ -117,13 +154,14 @@ def create_app(
         E' cio' che il firmware scarica davvero: una richiesta invece di
         dodici. Vedi render.render_screen per il perche'.
         """
+        visibili = _visible_pages()
         p = _page(page)
-        key = (page, store.version)
+        key = (page, _effective_version(visibili))
         png = screens.get(key)
         if png is None:
             png = render.screen_png(
                 p, store.layout["theme"],
-                page_index=page, page_count=len(store.layout["pages"]),
+                page_index=page, page_count=len(visibili),
                 root=root,
             )
             screens.clear()          # una sola versione per volta in memoria
@@ -154,7 +192,7 @@ def create_app(
     def get_state() -> dict:
         return {
             **probe.snapshot(),
-            "layout_version": store.version,
+            "layout_version": _effective_version(_visible_pages()),
             "layout_error": store.error,
         }
 

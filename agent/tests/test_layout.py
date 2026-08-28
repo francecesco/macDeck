@@ -126,11 +126,50 @@ def test_save_valida_prima_di_scrivere(tmp_path):
     assert f.read_text() == originale
 
 
-def test_save_incrementa_la_versione(tmp_path):
+def test_save_cambia_la_versione(tmp_path):
     store = L.LayoutStore(tmp_path / "layout.yaml")
     store.load()
     prima = store.version
     store.save({"pages": [{"name": "Nuova", "slots": []}]})
-    assert store.version > prima
+    assert store.version != prima
     assert store.layout["pages"][0]["name"] == "Nuova"
     assert store.error is None
+
+
+def test_la_versione_dipende_dal_contenuto_non_dai_riavvii(tmp_path):
+    """Il bug che ha lasciato la pagina 1 ferma alla griglia vecchia.
+
+    Con un contatore che riparte da 1 a ogni avvio, un agent riavviato con un
+    layout DIVERSO annunciava la stessa versione di prima, e il display
+    concludeva che non ci fosse nulla da ricaricare.
+    """
+    f = tmp_path / "layout.yaml"
+    primo = L.LayoutStore(f)
+    primo.load()
+    v1 = primo.version
+
+    # stesso contenuto, processo nuovo -> stessa versione
+    secondo = L.LayoutStore(f)
+    secondo.load()
+    assert secondo.version == v1
+
+    # contenuto diverso, processo nuovo -> versione diversa
+    f.write_text(yaml.safe_dump({"pages": [{"name": "Altro", "slots": []}]}))
+    terzo = L.LayoutStore(f)
+    terzo.load()
+    assert terzo.version != v1
+
+
+def test_when_sulle_pagine_viene_accettato_e_normalizzato():
+    out = L.validate({"pages": [
+        {"name": "Sempre", "slots": []},
+        {"name": "A volte", "when": "media.app", "slots": []},
+    ]})
+    assert out["pages"][0]["when"] is None
+    assert out["pages"][1]["when"] == "media.app"
+
+
+def test_when_non_stringa_viene_rifiutato():
+    with pytest.raises(L.LayoutError) as e:
+        L.validate({"pages": [{"name": "X", "when": 42, "slots": []}]})
+    assert "when" in str(e.value)

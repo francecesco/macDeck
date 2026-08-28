@@ -17,6 +17,8 @@ Due proprieta' che i test bloccano deliberatamente:
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -70,18 +72,22 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                 {"pos": [2, 1], "label": "Postman",
                  "icon": "app:/Applications/Postman.app",
                  "action": {"type": "app", "target": "Postman"}},
-                {"pos": [0, 2], "label": "Docker",
-                 "icon": "app:/Applications/Docker.app",
-                 "action": {"type": "app", "target": "Docker"}},
-                {"pos": [1, 2], "label": "Slack",
+                {"pos": [0, 2], "label": "Slack",
                  "icon": "app:/Applications/Slack.app",
                  "action": {"type": "app", "target": "Slack"}},
+                {"pos": [1, 2], "label": "Spotify",
+                 "icon": "app:/Applications/Spotify.app",
+                 "action": {"type": "app", "target": "Spotify"}},
                 {"pos": [2, 2], "label": "Screenshot", "icon": "mdi:camera",
                  "action": {"type": "keys", "keys": "cmd+shift+4"}},
             ],
         },
         {
+            # Compare solo quando c'e' davvero un player in esecuzione:
+            # aprendo Spotify dalla pagina Dev questa pagina si materializza
+            # da se' entro un ciclo di polling, e sparisce quando lo chiudi.
             "name": "Media",
+            "when": "media.app",
             "grid": {"cols": 3, "rows": 2},
             "slots": [
                 {"pos": [0, 0], "label": "Indietro", "icon": "mdi:skip-previous",
@@ -97,35 +103,6 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                  "state": "volume.muted"},
                 {"pos": [2, 1], "label": "Volume +", "icon": "mdi:volume-plus",
                  "action": {"type": "volume", "op": "up", "step": 8}},
-            ],
-        },
-        {
-            "name": "Casa",
-            "slots": [
-                {"pos": [0, 0], "label": "Home\nAssistant",
-                 "icon": "app:/Applications/Home Assistant.app",
-                 "action": {"type": "app", "target": "Home Assistant"}},
-                {"pos": [1, 0], "label": "Plancia", "icon": "mdi:tablet-dashboard",
-                 "action": {"type": "url", "url": "http://test-plancia.local"}},
-                {"pos": [2, 0], "label": "Spotify",
-                 "icon": "app:/Applications/Spotify.app",
-                 "action": {"type": "app", "target": "Spotify"}},
-                {"pos": [0, 1], "label": "Telegram",
-                 "icon": "app:/Applications/Telegram.app",
-                 "action": {"type": "app", "target": "Telegram"}},
-                {"pos": [1, 1], "label": "WhatsApp",
-                 "icon": "app:/Applications/WhatsApp.app",
-                 "action": {"type": "app", "target": "WhatsApp"}},
-                {"pos": [2, 1], "label": "VLC",
-                 "icon": "app:/Applications/VLC.app",
-                 "action": {"type": "app", "target": "VLC"}},
-                {"pos": [0, 2], "label": "Mission\nControl",
-                 "icon": "mdi:view-dashboard",
-                 "action": {"type": "keys", "keys": "ctrl+up"}},
-                {"pos": [1, 2], "label": "Spotlight", "icon": "mdi:magnify",
-                 "action": {"type": "keys", "keys": "cmd+space"}},
-                {"pos": [2, 2], "label": "Blocca", "icon": "mdi:lock",
-                 "action": {"type": "keys", "keys": "ctrl+cmd+q"}},
             ],
         },
     ],
@@ -194,6 +171,19 @@ def _check_action(spec: Any, where: str) -> dict:
     return spec
 
 
+def content_version(layout: dict) -> int:
+    """Versione derivata dal CONTENUTO, non da un contatore.
+
+    Un contatore che riparte da capo a ogni avvio dell'agent fa credere al
+    display che nulla sia cambiato quando invece il layout e' diverso: e'
+    successo, e la pagina 1 e' rimasta ferma alla griglia vecchia. Un hash
+    del contenuto cambia se e solo se cambia qualcosa, e sopravvive ai
+    riavvii.
+    """
+    payload = json.dumps(layout, sort_keys=True, ensure_ascii=False)
+    return int(hashlib.sha256(payload.encode()).hexdigest()[:8], 16)
+
+
 def validate(raw: dict) -> dict:
     if not isinstance(raw, dict):
         raise LayoutError("il layout deve essere una mappa")
@@ -216,6 +206,9 @@ def validate(raw: dict) -> dict:
         name = page.get("name")
         if not name or not isinstance(name, str):
             raise LayoutError(f"{where_page}: manca 'name'")
+        when = page.get("when")
+        if when is not None and not isinstance(when, str):
+            raise LayoutError(f"{where_page}: 'when' deve essere una stringa")
         page_grid = _check_grid(page.get("grid") or grid, f"{where_page}, griglia")
         boxes = slot_boxes(page_grid)
 
@@ -258,7 +251,8 @@ def validate(raw: dict) -> dict:
                     "action": _check_action(slot.get("action"), where_slot),
                 }
             )
-        pages.append({"name": name, "grid": page_grid, "slots": slots})
+        pages.append({"name": name, "grid": page_grid, "when": when,
+                      "slots": slots})
 
     return {"schema": 1, "grid": grid, "theme": theme, "pages": pages}
 
@@ -273,7 +267,7 @@ class LayoutStore:
     def __init__(self, path: Path):
         self.path = Path(path)
         self._layout: dict = copy.deepcopy(validate(DEFAULT_LAYOUT))
-        self._version = 1
+        self._version = content_version(self._layout)
         self.error: str | None = None
 
     @property
@@ -291,7 +285,7 @@ class LayoutStore:
                 yaml.safe_dump(DEFAULT_LAYOUT, sort_keys=False, allow_unicode=True)
             )
             self._layout = copy.deepcopy(validate(DEFAULT_LAYOUT))
-            self._version += 1
+            self._version = content_version(self._layout)
             self.error = None
             return
         try:
@@ -304,7 +298,7 @@ class LayoutStore:
         except LayoutError as e:
             self.error = f"layout non valido: {e}"
             return
-        self._version += 1
+        self._version = content_version(self._layout)
         self.error = None
 
     def save(self, raw: dict) -> None:
@@ -314,5 +308,5 @@ class LayoutStore:
             yaml.safe_dump(raw, sort_keys=False, allow_unicode=True)
         )
         self._layout = validated
-        self._version += 1
+        self._version = content_version(validated)
         self.error = None

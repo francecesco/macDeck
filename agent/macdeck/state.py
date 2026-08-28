@@ -71,6 +71,22 @@ _EMPTY_VOLUME = {"level": None, "muted": None}
 _EMPTY_MEDIA = {"app": None, "playing": False, "title": None, "artist": None}
 
 
+def value_at(data: dict, path: str):
+    """Legge un percorso puntato dentro uno snapshot: "media.app".
+
+    Stessa sintassi usata da `state:` sugli slot e da `when:` sulle pagine,
+    perche' un solo modo di indicare un valore e' meglio di due.
+    """
+    if not path:
+        return None
+    cur = data
+    for part in path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
 EMPTY_SNAPSHOT = {
     "volume": dict(_EMPTY_VOLUME),
     "media": dict(_EMPTY_MEDIA),

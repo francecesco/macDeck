@@ -58,7 +58,10 @@ def test_layout_richiede_il_token(ctx):
 def test_layout_espone_geometria_e_url_per_ogni_slot(ctx):
     client, store, *_ = ctx
     body = client.get("/layout", headers=AUTH).json()
-    assert body["version"] == store.version
+    stato = client.get("/state", headers=AUTH).json()
+    # /layout e /state devono annunciare LA STESSA versione, altrimenti il
+    # display ricarica in continuazione o non ricarica mai.
+    assert body["version"] == stato["layout_version"]
     assert body["page"] == 0
     assert body["pages"] == ["Prova", "Vuota"]
     slot = body["slots"][0]
@@ -120,7 +123,7 @@ def test_press_azione_asincrona_risponde_subito_come_accettata(ctx):
 def test_state_ha_le_chiavi_attese_e_la_versione(ctx):
     client, store, *_ = ctx
     body = client.get("/state", headers=AUTH).json()
-    assert body["layout_version"] == store.version
+    assert body["layout_version"] == client.get("/layout", headers=AUTH).json()["version"]
     for k in ("volume", "media", "system", "accessibility_ok", "last_error"):
         assert k in body
 
@@ -279,9 +282,9 @@ def test_screen_pagina_inesistente(ctx):
 
 
 def test_layout_indica_lurl_della_schermata(ctx):
-    client, store, *_ = ctx
+    client, *_ = ctx
     body = client.get("/layout", headers=AUTH).json()
-    assert body["screen"] == f"/screen/0.png?v={store.version}"
+    assert body["screen"] == f"/screen/0.png?v={body['version']}"
 
 
 def test_screen_cambia_dopo_un_salvataggio(ctx):
@@ -298,3 +301,103 @@ def test_screen_di_una_pagina_vuota_non_esplode(ctx):
     client, *_ = ctx
     r = client.get("/screen/1.png", headers=AUTH)
     assert r.status_code == 200
+
+
+# ------------------------------------------------- pagine a comparsa (when:)
+
+LAYOUT_CON_WHEN = {
+    "pages": [
+        {"name": "Sempre", "slots": [
+            {"pos": [0, 0], "label": "A", "icon": "text:A",
+             "action": {"type": "noop"}}]},
+        {"name": "SoloConPlayer", "when": "media.app", "slots": [
+            {"pos": [0, 0], "label": "B", "icon": "text:B",
+             "action": {"type": "media", "op": "play_pause"}}]},
+    ]
+}
+
+
+def _con_player(fake_ex, attivo: bool):
+    if attivo:
+        fake_ex.replies = {"running_apps": R(True, out="Spotify\ntrue\nX\nY\n")}
+    else:
+        fake_ex.replies = {"running_apps": R(True, out="none\n")}
+
+
+def test_pagina_con_when_e_nascosta_se_la_condizione_e_falsa(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_CON_WHEN)
+    _con_player(fake_ex, False)
+    probe.refresh()
+    body = client.get("/layout", headers=AUTH).json()
+    assert body["pages"] == ["Sempre"]
+
+
+def test_pagina_con_when_compare_quando_la_condizione_diventa_vera(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_CON_WHEN)
+    _con_player(fake_ex, True)
+    probe.refresh()
+    body = client.get("/layout", headers=AUTH).json()
+    assert body["pages"] == ["Sempre", "SoloConPlayer"]
+    assert client.get("/layout?page=1", headers=AUTH).status_code == 200
+
+
+def test_la_versione_cambia_quando_una_pagina_compare(ctx):
+    """Senza questo, il display non si accorgerebbe della pagina nuova."""
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_CON_WHEN)
+    _con_player(fake_ex, False)
+    probe.refresh()
+    senza = client.get("/state", headers=AUTH).json()["layout_version"]
+    _con_player(fake_ex, True)
+    probe.refresh()
+    con = client.get("/state", headers=AUTH).json()["layout_version"]
+    assert senza != con
+
+
+def test_una_pagina_nascosta_non_e_raggiungibile(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_CON_WHEN)
+    _con_player(fake_ex, False)
+    probe.refresh()
+    assert client.get("/layout?page=1", headers=AUTH).status_code == 404
+    assert client.get("/screen/1.png", headers=AUTH).status_code == 404
+
+
+def test_se_nessuna_pagina_e_visibile_si_mostrano_tutte(ctx):
+    """Un deck vuoto e' peggio di un deck con una pagina di troppo."""
+    client, store, fake_ex, probe = ctx
+    store.save({"pages": [{"name": "Solo", "when": "media.app", "slots": []}]})
+    _con_player(fake_ex, False)
+    probe.refresh()
+    assert client.get("/layout", headers=AUTH).json()["pages"] == ["Solo"]
+
+
+def test_la_schermata_riflette_la_pagina_visibile_giusta(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_CON_WHEN)
+    _con_player(fake_ex, True)
+    probe.refresh()
+    assert client.get("/screen/1.png", headers=AUTH).status_code == 200
+    _con_player(fake_ex, False)
+    probe.refresh()
+    assert client.get("/screen/1.png", headers=AUTH).status_code == 404
+
+
+def test_la_versione_efficace_e_stabile_fra_processi(tmp_path, fake_ex):
+    """hash() di Python e' randomizzato per processo: usarlo qui rimetterebbe
+    il difetto che content_version() serviva a togliere."""
+    from macdeck.app import create_app as crea
+    from macdeck.render import TileCache as Cache
+    from macdeck.state import StateProbe as Probe
+
+    def versione():
+        store = L.LayoutStore(tmp_path / "layout.yaml")
+        store.load()
+        app = crea(store=store, cache=Cache(), probe=Probe(fake_ex),
+                   executor=fake_ex, token=TOKEN, root=tmp_path,
+                   trust_loopback_header=True)
+        return TestClient(app).get("/layout", headers=AUTH).json()["version"]
+
+    assert versione() == versione()
