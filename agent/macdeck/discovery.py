@@ -31,7 +31,13 @@ DEVICE_NAME = "macdeck"
 # L'entita' testo esposta dal firmware che contiene l'indirizzo dell'agent.
 HOST_ENTITY = "Indirizzo agent"
 
-DISCOVERY_TIMEOUT = 4.0
+# Dieci secondi e non quattro: il deck risponde all'annuncio Bonjour quando
+# il suo loop principale glielo lascia fare, e quel loop e' occupato a
+# disegnare e a interrogare il Mac. Con quattro secondi la ricerca falliva a
+# intermittenza — misurato: fallita a 6 s, riuscita a 10 sullo stesso deck
+# acceso e raggiungibile. Il costo e' nullo, gira in un thread di sfondo
+# ogni trenta secondi.
+DISCOVERY_TIMEOUT = 10.0
 API_TIMEOUT = 10.0
 
 
