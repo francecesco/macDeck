@@ -63,9 +63,11 @@ def test_senza_navbar_le_tile_sono_piu_alte():
     con = L.slot_boxes(L.DEFAULT_GRID, navbar=True)[0]
     senza = L.slot_boxes(L.DEFAULT_GRID, navbar=False)[0]
     assert senza["w"] == con["w"]
-    assert senza["h"] == con["h"] + 9      # 28 px di barra / 3 righe
     assert con["h"] == 92
-    assert senza["h"] == 101
+    assert senza["h"] == 98
+    # e l'ultima riga non tocca il bordo inferiore
+    ultima = L.slot_boxes(L.DEFAULT_GRID, navbar=False)[8]
+    assert ultima["y"] + ultima["h"] <= L.DISPLAY_H - 8
 
 
 def test_due_slot_sulla_stessa_casella_se_almeno_uno_ha_when():

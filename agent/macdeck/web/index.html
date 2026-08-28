@@ -126,7 +126,7 @@ textarea{min-height:76px;font-family:ui-monospace,Menlo,monospace;font-size:12.5
 // Replica del calcolo di layout.py. Il pannello e' 320x480, ma LVGL lo ruota
 // via software (rotation: 90) e ruota anche il touch: lo spazio utile e'
 // 480x320 landscape, ed e' in quello che si ragiona qui.
-const DW=480, DH=320, HEADER=0, NAVBAR=28, GUT=4, MAX_SLOTS=12;
+const DW=480, DH=320, HEADER=0, NAVBAR=28, GUT=4, BOTTOM=10, MAX_SLOTS=12;
 
 // La navbar esiste solo con piu' di una pagina: senza, i suoi 28 px vanno
 // alle tile. Stessa regola del server (layout.slot_boxes).
@@ -134,7 +134,7 @@ function hasNav(){ return model && model.pages.length > 1; }
 
 function slotBoxes(grid, navbar){
   const cols=grid.cols, rows=grid.rows;
-  const areaH = DH - HEADER - (navbar ? NAVBAR : 0);
+  const areaH = DH - HEADER - (navbar ? NAVBAR : BOTTOM);
   const w = Math.floor((DW - (cols+1)*GUT)/cols);
   const h = Math.floor((areaH - (rows+1)*GUT)/rows);
   const out={};

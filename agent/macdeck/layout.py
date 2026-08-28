@@ -36,6 +36,11 @@ DISPLAY_H = 320
 HEADER_H = 0
 NAVBAR_H = 28
 GUTTER = 4
+# Margine di sicurezza in fondo quando non c'e' la navbar. Senza, l'ultima
+# riga arriva a y=315 su un pannello di 320 ed e' a filo del bordo: su questo
+# esemplare gli ultimi pixel non si vedono e le icone sembrano tagliate.
+# Con la navbar non serve, perche' quella fa gia' da distanziatore.
+BOTTOM_MARGIN = 10
 MAX_SLOTS = 12
 
 DEFAULT_GRID: dict[str, int] = {"cols": 3, "rows": 3}
@@ -118,7 +123,7 @@ def slot_boxes(grid: dict, *, navbar: bool = True) -> dict[int, dict]:
     al momento di servire la richiesta, quando la visibilita' e' nota.
     """
     cols, rows = int(grid["cols"]), int(grid["rows"])
-    area_h = DISPLAY_H - HEADER_H - (NAVBAR_H if navbar else 0)
+    area_h = DISPLAY_H - HEADER_H - (NAVBAR_H if navbar else BOTTOM_MARGIN)
     w = (DISPLAY_W - (cols + 1) * GUTTER) // cols
     h = (area_h - (rows + 1) * GUTTER) // rows
     boxes = {}

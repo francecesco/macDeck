@@ -366,6 +366,31 @@ batteria: non c'è niente da risparmiare. `on_idle` è stato rimosso. La
 retroilluminazione resta un'entità controllabile, quindi si può sempre
 spegnere a comando.
 
+### L'ultima riga non deve toccare il bordo
+
+Senza navbar la griglia arrivava a y=315 su un pannello di 320, e su questo
+esemplare gli ultimi pixel non si vedono: le icone in basso sembravano
+tagliate. `BOTTOM_MARGIN = 10` si applica **solo** quando la navbar non c'è,
+perché con la barra quella fa già da distanziatore. Tile da 101 a 98, ultima
+riga che finisce a 306.
+
+### Il componente `http_request` ne regge una alla volta
+
+Terza manifestazione dello stesso vincolo, dopo la chiamata annidata nel
+callback. Toccando un pulsante compariva "Mac non raggiungibile": la POST di
+`press_slot` e la GET del polling da 2 s si sovrapponevano, la seconda
+falliva, e tre fallimenti accendevano il banner.
+
+Tre correzioni, dalla causa all'effetto:
+
+- `press_slot` è **`mode: queued`** e non `parallel`: due tocchi ravvicinati
+  non si fanno più fallire a vicenda;
+- un contatore `press_in_corso` fa **saltare un ciclo** al polling quando c'è
+  un tocco in volo — il tocco ha la precedenza, lo stato può aspettare 2 s;
+- la soglia del banner passa da 3 a **5 cicli**, una decina di secondi:
+  un'assenza vera dura, una collisione no. Un banner che lampeggia al primo
+  intoppo insegna a ignorarlo.
+
 ## Comandi utili
 
 ```bash

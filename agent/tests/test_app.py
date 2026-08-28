@@ -258,7 +258,7 @@ def test_tile_preview_rende_una_tile_non_salvata(ctx, tmp_path):
     })
     assert r.status_code == 200
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (154, 101)
+        assert im.size == (154, 98)
     assert store.version == prima          # l'anteprima non salva nulla
 
 
@@ -269,7 +269,7 @@ def test_tile_preview_rispetta_la_griglia_richiesta(ctx):
         "slot": {"pos": [0, 0], "label": "Grande", "icon": "text:G"},
     })
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (234, 154)
+        assert im.size == (234, 149)
 
 
 def test_tile_preview_rifiuta_una_griglia_impossibile(ctx):
@@ -492,7 +492,7 @@ def test_una_pagina_sola_non_ha_navbar_e_le_tile_sono_piu_alte(ctx):
     probe.refresh()
     body = client.get("/layout", headers=AUTH).json()
     assert body["nav"] is False
-    assert body["slots"][0]["h"] == 101
+    assert body["slots"][0]["h"] == 98
 
 
 def test_con_due_pagine_la_navbar_torna_e_le_tile_si_abbassano(ctx):

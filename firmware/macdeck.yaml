@@ -162,6 +162,10 @@ globals:
     type: int
     restore_value: false
     initial_value: "0"
+  - id: press_in_corso
+    type: int
+    restore_value: false
+    initial_value: "0"
   - id: serve_layout
     type: bool
     restore_value: false
@@ -326,8 +330,11 @@ script:
           on_error:
             then:
               - lambda: |-
+                  // Cinque cicli, cioe' una decina di secondi: un'assenza
+                  // vera dura, una collisione momentanea no. Un banner che
+                  // lampeggia al primo intoppo insegna a ignorarlo.
                   id(fail_streak)++;
-                  if (id(fail_streak) >= 3) id(agent_online) = false;
+                  if (id(fail_streak) >= 5) id(agent_online) = false;
       # Fuori dal gestore di risposta: lanciare una seconda richiesta HTTP da
       # dentro il callback della prima non funziona, il componente e' occupato.
       # Con la bandiera il tentativo si ripete al ciclo dopo se fallisce,
@@ -366,11 +373,17 @@ script:
       - script.execute: fetch_layout
 
   - id: press_slot
-    mode: parallel
+    # In CODA, non in parallelo: il componente http_request regge una
+    # richiesta alla volta, e due tocchi ravvicinati si facevano fallire a
+    # vicenda. Il contatore serve al polling per non sbattere contro la POST
+    # del tocco: era quello a far comparire "Mac non raggiungibile" premendo
+    # un pulsante.
+    mode: queued
     max_runs: 4
     parameters:
       slot: int
     then:
+      - lambda: 'id(press_in_corso)++;'
       - http_request.post:
           url: "http://${agent_host}:${agent_port}/press"
           request_headers:
@@ -379,11 +392,16 @@ script:
           json: |-
             root["page"] = id(current_page);
             root["slot"] = slot;
+      - lambda: 'if (id(press_in_corso) > 0) id(press_in_corso)--;' 
 
 interval:
   - interval: 2s
     then:
-      - script.execute: fetch_state
+      - if:
+          condition:
+            lambda: 'return id(press_in_corso) == 0;'
+          then:
+            - script.execute: fetch_state
 
 # ------------------------------------------------------------------- LVGL
 
