@@ -289,6 +289,20 @@ soddisfatto; se nessuno lo è, vince quello senza condizione. Due slot
 incondizionati sulla stessa casella restano un errore di validazione, perché
 quello è un refuso e non un'intenzione.
 
+### Niente fascia fissa in alto
+
+`HEADER_H = 0`. Volume, brano e CPU erano decorazione su un aggeggio che serve
+a lanciare cose, e costavano 36 px **permanenti**.
+
+Quello che invece conta davvero — Mac irraggiungibile, permesso Accessibilità
+mancante — non è stato buttato ma spostato su una **sovrapposizione LVGL
+normalmente nascosta**, che occupa spazio solo quando c'è qualcosa da dire.
+Deve essere LVGL e non un pixel dell'immagine, perché l'avviso "Mac non
+raggiungibile" serve esattamente quando il Mac non può più disegnare nulla.
+
+Risultato cumulativo sulla griglia 3×3: tile da 115×80 (4×3 con fascia e
+barra) a **154×101**, icone circa il 49% più grandi.
+
 ### La geometria non si può calcolare in validazione
 
 `slot_boxes` dipende da `navbar`, che dipende da quante pagine sono **visibili**,

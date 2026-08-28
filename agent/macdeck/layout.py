@@ -28,7 +28,12 @@ from .actions import known_types
 
 DISPLAY_W = 480
 DISPLAY_H = 320
-HEADER_H = 36
+# Nessuna fascia fissa in alto: le informazioni che ci stavano (volume, brano,
+# CPU) sono decorazione su un aggeggio che serve a lanciare cose, e costavano
+# 36 px permanenti. Gli avvisi che invece contano davvero — Mac irraggiungibile,
+# permesso Accessibilita' mancante — li disegna LVGL come sovrapposizione, che
+# occupa spazio solo quando c'e' qualcosa che non va.
+HEADER_H = 0
 NAVBAR_H = 28
 GUTTER = 4
 MAX_SLOTS = 12

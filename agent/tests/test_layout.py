@@ -5,9 +5,11 @@ from macdeck import layout as L
 
 
 def test_geometria_della_griglia_di_default():
-    boxes = L.slot_boxes(L.DEFAULT_GRID)
+    # navbar=True e' il default della funzione; il caso reale a pagina unica
+    # e' coperto da test_senza_navbar_le_tile_sono_piu_alte.
+    boxes = L.slot_boxes(L.DEFAULT_GRID, navbar=True)
     assert len(boxes) == 9
-    assert boxes[0] == {"x": 4, "y": 40, "w": 154, "h": 80}
+    assert boxes[0] == {"x": 4, "y": 4, "w": 154, "h": 92}
     last = boxes[max(boxes)]
     assert last["x"] + last["w"] <= L.DISPLAY_W
     assert last["y"] + last["h"] <= L.DISPLAY_H - L.NAVBAR_H
@@ -61,8 +63,9 @@ def test_senza_navbar_le_tile_sono_piu_alte():
     con = L.slot_boxes(L.DEFAULT_GRID, navbar=True)[0]
     senza = L.slot_boxes(L.DEFAULT_GRID, navbar=False)[0]
     assert senza["w"] == con["w"]
-    assert senza["h"] == con["h"] + L.NAVBAR_H // 3
-    assert senza["h"] == 89
+    assert senza["h"] == con["h"] + 9      # 28 px di barra / 3 righe
+    assert con["h"] == 92
+    assert senza["h"] == 101
 
 
 def test_due_slot_sulla_stessa_casella_se_almeno_uno_ha_when():

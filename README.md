@@ -58,7 +58,7 @@ Costo: ~250 KB di PSRAM su 8 MB, e **una** GET HTTP quando cambia il layout.
 **Il landscape passa da LVGL, non dal display:** l'AXS15231B non supporta lo
 scambio degli assi e ESPHome rifiuta il `transform`. Si usa `lvgl: rotation: 90`,
 che ruota via software e ruota anche il touch. Lo spazio utile è 480×320 e la
-griglia di default è 3×3 con tile da 154×80. Meno righe = icone più grandi: 3×2 dà tile 154×122.
+griglia di default è 3×3 con tile da **154×101**: senza fascia in alto e senza navbar, lo schermo è tutto per le tile. Meno righe = icone ancora più grandi.
 
 Pinout: QSPI CLK 47, data 21/48/40/39, CS 45 · backlight GPIO1 (LEDC) · touch I²C
 SDA 4, SCL 8. Supporto ESPHome **nativo** (`mipi_spi` con preset `JC3248W535` +

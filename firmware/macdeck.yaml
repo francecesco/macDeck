@@ -160,6 +160,10 @@ globals:
     type: int
     restore_value: false
     initial_value: "0"
+  - id: accessibilita_ok
+    type: bool
+    restore_value: false
+    initial_value: "true"
   - id: state_keys
     type: std::array<std::string, 12>
     restore_value: false
@@ -276,28 +280,7 @@ script:
                     id(hit_4), id(hit_5), id(hit_6), id(hit_7),
                     id(hit_8), id(hit_9), id(hit_10), id(hit_11)};
                   json::parse_json(body, [&](JsonObject root) -> bool {
-                    char buf[96];
-
-                    int vol = root["volume"]["level"] | -1;
-                    bool muted = root["volume"]["muted"] | false;
-                    if (vol < 0)    snprintf(buf, sizeof(buf), "--");
-                    else if (muted) snprintf(buf, sizeof(buf), "muto");
-                    else            snprintf(buf, sizeof(buf), "%d%%", vol);
-                    lv_label_set_text(id(hdr_volume), buf);
-
-                    const char *title = root["media"]["title"] | "";
-                    lv_label_set_text(id(hdr_media), title);
-
-                    float cpu = root["system"]["cpu"] | 0.0f;
-                    int bat = root["system"]["battery"] | -1;
-                    if (bat >= 0)
-                      snprintf(buf, sizeof(buf), "cpu %.0f%%  bat %d%%", cpu, bat);
-                    else
-                      snprintf(buf, sizeof(buf), "cpu %.0f%%", cpu);
-                    lv_label_set_text(id(hdr_system), buf);
-
-                    bool acc = root["accessibility_ok"] | true;
-                    lv_label_set_text(id(hdr_warn), acc ? "" : "!");
+                    id(accessibilita_ok) = root["accessibility_ok"] | true;
 
                     // Bordo di accento sugli slot la cui chiave di stato e'
                     // veritiera: le aree di tocco sono trasparenti, quindi il
@@ -341,10 +324,21 @@ script:
               - lambda: |-
                   id(fail_streak)++;
                   if (id(fail_streak) >= 3) id(agent_online) = false;
-      - lvgl.label.update:
-          id: hdr_offline
-          text: !lambda |-
-            return std::string(id(agent_online) ? "" : "Mac non raggiungibile");
+      - lambda: |-
+          // L'avviso e' l'unica cosa che ruba spazio alle tile, quindi si
+          // mostra solo quando c'e' davvero qualcosa da dire.
+          const char *msg = nullptr;
+          if (!id(agent_online))
+            msg = "Mac non raggiungibile";
+          else if (!id(accessibilita_ok))
+            msg = "Permesso Accessibilita' mancante: le scorciatoie da "
+                  "tastiera non funzioneranno";
+          if (msg != nullptr) {
+            lv_label_set_text(id(avviso_testo), msg);
+            lv_obj_clear_flag(id(avviso), LV_OBJ_FLAG_HIDDEN);
+          } else {
+            lv_obj_add_flag(id(avviso), LV_OBJ_FLAG_HIDDEN);
+          }
 
   - id: change_page
     mode: single
@@ -392,55 +386,33 @@ lvgl:
       - lvgl.pause:
   top_layer:
     widgets:
+      # Nessuna fascia fissa: volume, brano e CPU erano decorazione e
+      # costavano 36 px permanenti. Resta solo cio' che serve sapere quando
+      # qualcosa non va, e occupa spazio soltanto in quel caso.
       - obj:
-          x: 0
-          y: 0
-          width: 480
-          height: 36
-          bg_color: 0x12141A
+          id: avviso
+          x: 60
+          y: 125
+          width: 360
+          height: 70
+          bg_color: 0x3A1A1A
           bg_opa: COVER
-          border_width: 0
-          pad_all: 0
-          radius: 0
+          radius: 12
+          border_width: 2
+          border_color: 0xFF6B6B
+          pad_all: 8
+          hidden: true
           widgets:
             - label:
-                id: hdr_volume
-                x: 8
-                y: 10
-                text: "--"
-                text_color: 0xE8EAF0
-                text_font: font_hdr
-            - label:
-                id: hdr_media
-                x: 70
-                y: 10
-                width: 200
-                text: ""
-                text_color: 0x9AA3B2
-                text_font: font_hdr
-                long_mode: DOT
-            - label:
-                id: hdr_system
-                x: 290
-                y: 10
-                text: ""
-                text_color: 0x9AA3B2
-                text_font: font_hdr
-            - label:
-                id: hdr_warn
-                x: 462
-                y: 10
-                text: ""
-                text_color: 0xFFAA3C
-                text_font: font_hdr
-            - label:
-                id: hdr_offline
+                id: avviso_testo
                 x: 0
-                y: 10
-                width: 480
+                y: 0
+                width: 344
                 text: ""
                 align: CENTER
-                text_color: 0xFF6B6B
+                long_mode: WRAP
+                text_align: CENTER
+                text_color: 0xFFC9C9
                 text_font: font_hdr
   pages:
     - id: deck_page
@@ -458,9 +430,9 @@ lvgl:
         - obj:
             id: hit_0
             x: 4
-            y: 40
-            width: 115
-            height: 80
+            y: 4
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -474,10 +446,10 @@ lvgl:
                     slot: 0
         - obj:
             id: hit_1
-            x: 123
-            y: 40
-            width: 115
-            height: 80
+            x: 162
+            y: 4
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -491,10 +463,10 @@ lvgl:
                     slot: 1
         - obj:
             id: hit_2
-            x: 242
-            y: 40
-            width: 115
-            height: 80
+            x: 320
+            y: 4
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -508,10 +480,10 @@ lvgl:
                     slot: 2
         - obj:
             id: hit_3
-            x: 361
-            y: 40
-            width: 115
-            height: 80
+            x: 4
+            y: 109
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -525,10 +497,10 @@ lvgl:
                     slot: 3
         - obj:
             id: hit_4
-            x: 4
-            y: 124
-            width: 115
-            height: 80
+            x: 162
+            y: 109
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -542,10 +514,10 @@ lvgl:
                     slot: 4
         - obj:
             id: hit_5
-            x: 123
-            y: 124
-            width: 115
-            height: 80
+            x: 320
+            y: 109
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -559,10 +531,10 @@ lvgl:
                     slot: 5
         - obj:
             id: hit_6
-            x: 242
-            y: 124
-            width: 115
-            height: 80
+            x: 4
+            y: 214
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -576,10 +548,10 @@ lvgl:
                     slot: 6
         - obj:
             id: hit_7
-            x: 361
-            y: 124
-            width: 115
-            height: 80
+            x: 162
+            y: 214
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -593,10 +565,10 @@ lvgl:
                     slot: 7
         - obj:
             id: hit_8
-            x: 4
-            y: 208
-            width: 115
-            height: 80
+            x: 320
+            y: 214
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -610,10 +582,10 @@ lvgl:
                     slot: 8
         - obj:
             id: hit_9
-            x: 123
-            y: 208
-            width: 115
-            height: 80
+            x: 4
+            y: 319
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -627,10 +599,10 @@ lvgl:
                     slot: 9
         - obj:
             id: hit_10
-            x: 242
-            y: 208
-            width: 115
-            height: 80
+            x: 162
+            y: 319
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0
@@ -644,10 +616,10 @@ lvgl:
                     slot: 10
         - obj:
             id: hit_11
-            x: 361
-            y: 208
-            width: 115
-            height: 80
+            x: 320
+            y: 319
+            width: 154
+            height: 101
             radius: 10
             bg_opa: TRANSP
             border_width: 0

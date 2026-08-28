@@ -7,7 +7,7 @@ from macdeck.render import TileCache, render_tile, resolve_font, tile_png
 
 SLOT = {
     "pos": [0, 0], "index": 0,
-    "box": {"x": 4, "y": 40, "w": 154, "h": 80},
+    "box": {"x": 4, "y": 4, "w": 154, "h": 101},
     "label": "DataGrip", "icon": "text:DG", "color": None,
     "state": None, "action": {"type": "noop"},
 }
@@ -24,7 +24,7 @@ def test_font_ignoto_ripiega_senza_sollevare():
 
 def test_tile_ha_la_dimensione_del_box():
     im = render_tile(SLOT, L.DEFAULT_THEME)
-    assert im.size == (154, 80)
+    assert im.size == (154, 101)
     assert im.mode == "RGB"
 
 
@@ -47,19 +47,19 @@ def test_color_override_cambia_il_risultato():
 
 def test_etichetta_lunga_non_solleva_e_resta_nel_box():
     slot = {**SLOT, "label": "Etichetta davvero molto lunga che non ci sta"}
-    assert render_tile(slot, L.DEFAULT_THEME).size == (154, 80)
+    assert render_tile(slot, L.DEFAULT_THEME).size == (154, 101)
 
 
 def test_etichetta_con_accenti_e_simboli():
     slot = {**SLOT, "label": "Città 21°"}
-    assert render_tile(slot, L.DEFAULT_THEME).size == (154, 80)
+    assert render_tile(slot, L.DEFAULT_THEME).size == (154, 101)
 
 
 def test_tile_png_e_un_png_valido():
     data = tile_png(SLOT, L.DEFAULT_THEME)
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
     with Image.open(io.BytesIO(data)) as im:
-        assert im.size == (154, 80)
+        assert im.size == (154, 101)
 
 
 def test_cache_riusa_lo_stesso_risultato():
