@@ -295,7 +295,12 @@ def create_app(
         apps.sort(key=lambda a: a["name"].lower())
         mdi = [n for n in icons.mdi_names(root) if not needle or needle in n]
         return {
-            "apps": apps[:120],
+            # Le app NON si tagliano: il selettore scarica l'elenco intero
+            # e filtra nel browser, quindi un taglio renderebbe invisibili
+            # quelle in fondo all'alfabeto — Terminale spariva, iTerm no.
+            # Sono qualche centinaio, e il JSON viaggia su loopback.
+            "apps": apps,
+            # I glifi MDI sono settemila: quelli si tagliano davvero.
             "mdi": mdi[:120],
             "mdi_total": len(mdi),
             "action_types": sorted(actions.known_types()),

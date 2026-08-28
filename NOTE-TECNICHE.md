@@ -562,6 +562,26 @@ danno `(null)`. Il risultato sta in cache di modulo (`reset_display_names()`
 per svuotarla). La ricerca per nome prova prima il disco, poi il tradotto;
 `/api/icons` cerca su entrambi e **mostra** quello tradotto.
 
+### Un limite innocuo diventa dannoso se cambia chi filtra
+
+`/api/icons` tagliava sia le app sia i glifi a 120. Finche' il filtro stava
+sul server — si passava `?q=` e tornavano i primi 120 risultati *di quella
+ricerca* — il limite non si notava mai.
+
+Il selettore ha spostato il filtro nel browser: scarica l'elenco intero e
+cerca lì. Da quel momento il taglio a 120 morde **sempre**, e in ordine
+alfabetico: l'ultima app servita era `MDMMigrationTrampoline`, quindi tutto
+da M in poi era invisibile. Cercando "terminal" compariva iTerm — che sta
+sotto la i — e Terminale no. Sembrava un difetto della ricerca, era un
+difetto dell'elenco.
+
+Le app non si tagliano più: sono 222, il JSON pesa 37 KB e viaggia su
+loopback. I glifi MDI restano tagliati, perche' quelli sono settemila — ed
+era per loro che il limite esisteva.
+
+La lezione non è sul numero: **spostare il filtro da una parte all'altra
+cambia il significato di ogni limite che sta in mezzo**.
+
 ### In configurazione servono tutte le tile, non quella che si vedrebbe adesso
 
 Con gli slot condizionali più tile condividono una casella. La GUI mostrava
@@ -580,7 +600,7 @@ si finisce per correggere la tile sbagliata.
 
 ```bash
 cd agent
-.venv/bin/python -m pytest                        # 254 test, nessun hardware
+.venv/bin/python -m pytest                        # 255 test, nessun hardware
 .venv/bin/python -m macdeck.cli doctor            # permessi e configurazione
 .venv/bin/python -m macdeck.cli token             # token da mettere nei secrets
 .venv/bin/python -m macdeck.cli pair              # insegna al deck la rete di adesso

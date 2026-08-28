@@ -506,3 +506,27 @@ def test_con_due_pagine_la_navbar_torna_e_le_tile_si_abbassano(ctx):
     body = client.get("/layout", headers=AUTH).json()
     assert body["nav"] is True
     assert body["slots"][0]["h"] == 92
+
+
+def test_l_elenco_app_non_viene_troncato(ctx):
+    # Il selettore scarica l'elenco intero e filtra nel browser: se il server
+    # ne manda solo una fetta, le app in fondo all'alfabeto sono
+    # irraggiungibili e sembrano non installate.
+    from macdeck import icons
+    client = ctx[0]
+    installate = {b.stem for d in icons.app_dirs() for b in d.glob("*.app")}
+    r = client.get("/api/icons", headers=LOCAL)
+    assert r.status_code == 200
+    restituite = {a["disk"] for a in r.json()["apps"]}
+    mancanti = installate - restituite
+    assert not mancanti, f"{len(mancanti)} app non elencate, es. {sorted(mancanti)[:5]}"
+
+
+def test_i_glifi_mdi_restano_limitati(ctx):
+    # Sono settemila: quelli vanno tagliati, ed e' il motivo per cui il
+    # limite esisteva. Le app sono un paio di centinaia, e non c'entrano.
+    r = ctx[0].get("/api/icons", headers=LOCAL)
+    d = r.json()
+    if not d["mdi_total"]:
+        pytest.skip("font MDI non installato in questa radice di prova")
+    assert len(d["mdi"]) <= 120
