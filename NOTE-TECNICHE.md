@@ -244,6 +244,38 @@ pochissimo. Per ingrandirla davvero bisogna togliere una riga: 3×2 dà tile
 `theme.icon_scale` permette di regolare la dimensione senza toccare il
 codice, e il renderer limita comunque l'icona al box della tile.
 
+### La pagina corrente del display può sparire sotto i piedi
+
+Con le pagine condizionali (`when:`) l'insieme delle pagine visibili cambia da
+solo mentre il display ne sta guardando una. Se il display è sulla pagina 2 e
+quella pagina smette di essere visibile, `GET /layout?page=2` non deve dare
+404: il display non avrebbe modo di sapere dove andare e resterebbe bloccato lì.
+
+**Il protocollo dice invece:** il server riporta l'indice dentro l'intervallo
+valido e comunica nel campo `page` della risposta su quale pagina si trova
+davvero. Il firmware adotta quel valore. Vale per `/layout`, `/screen` e
+`/press`, che devono clampare allo stesso modo, altrimenti il tocco agirebbe
+su una pagina diversa da quella mostrata.
+
+### Non registrare una versione prima di averla applicata
+
+Errore gemello del precedente, e più insidioso. `fetch_state` faceva così:
+
+```cpp
+if (v != id(layout_version)) {
+  id(layout_version) = v;        // SBAGLIATO: segnato come applicato
+  id(fetch_layout).execute();    // ...ma questa puo' fallire
+}
+```
+
+Quando `fetch_layout` falliva anche una sola volta — nel caso reale, un 404
+sulla pagina sparita — la versione risultava già registrata e il display non
+aveva più motivo di riprovare: cristallizzato su un layout vecchio, in modo
+permanente e silenzioso.
+
+`id(layout_version)` va scritto **solo** dentro il ramo di successo di
+`fetch_layout`. `fetch_state` confronta e innesca, non registra.
+
 ## Comandi utili
 
 ```bash

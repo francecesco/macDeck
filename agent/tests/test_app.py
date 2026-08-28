@@ -69,10 +69,18 @@ def test_layout_espone_geometria_e_url_per_ogni_slot(ctx):
     assert slot["url"].startswith("/tile/0/")
 
 
-def test_layout_pagina_inesistente(ctx):
+def test_pagina_fuori_intervallo_viene_riportata_dentro(ctx):
+    """Il display resterebbe altrimenti bloccato su una pagina sparita.
+
+    Succede ogni volta che una pagina con `when:` smette di essere visibile
+    mentre il display ci si trova sopra.
+    """
     client, *_ = ctx
-    assert client.get("/layout?page=99", headers=AUTH).status_code == 404
-    assert client.get("/layout?page=1", headers=AUTH).status_code == 200
+    r = client.get("/layout?page=99", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["page"] == 1          # ultima valida, non quella chiesta
+    assert client.get("/layout?page=1", headers=AUTH).json()["page"] == 1
+    assert client.get("/layout?page=-5", headers=AUTH).json()["page"] == 0
 
 
 def test_tile_restituisce_un_png_della_dimensione_giusta(ctx):
@@ -108,6 +116,15 @@ def test_press_su_slot_vuoto(ctx):
     client, *_ = ctx
     r = client.post("/press", json={"page": 0, "slot": 5}, headers=AUTH)
     assert r.status_code == 404
+
+
+def test_press_su_una_pagina_fuori_intervallo_agisce_sull_ultima(ctx):
+    client, _store, fake_ex, _p = ctx
+    r = client.post("/press", json={"page": 99, "slot": 0}, headers=AUTH)
+    # la pagina 1 di prova e' vuota: nessuno slot 0, quindi 404 sullo SLOT
+    # e non sulla pagina. Il punto e' che non esplode sull'indice di pagina.
+    assert r.status_code == 404
+    assert "slot" in r.json()["detail"]
 
 
 def test_press_azione_asincrona_risponde_subito_come_accettata(ctx):
@@ -276,9 +293,12 @@ def test_screen_richiede_il_token(ctx):
     assert client.get("/screen/0.png").status_code == 401
 
 
-def test_screen_pagina_inesistente(ctx):
+def test_screen_di_una_pagina_fuori_intervallo_ripiega_sull_ultima(ctx):
     client, *_ = ctx
-    assert client.get("/screen/9.png", headers=AUTH).status_code == 404
+    fuori = client.get("/screen/9.png", headers=AUTH)
+    ultima = client.get("/screen/1.png", headers=AUTH)
+    assert fuori.status_code == 200
+    assert fuori.content == ultima.content
 
 
 def test_layout_indica_lurl_della_schermata(ctx):
@@ -356,13 +376,17 @@ def test_la_versione_cambia_quando_una_pagina_compare(ctx):
     assert senza != con
 
 
-def test_una_pagina_nascosta_non_e_raggiungibile(ctx):
+def test_chi_e_fermo_su_una_pagina_sparita_viene_riportato_indietro(ctx):
+    """Lo scenario reale: il display era sulla pagina Media, il player si
+    chiude, la pagina sparisce. Deve ritrovarsi sulla pagina 0, non bloccato."""
     client, store, fake_ex, probe = ctx
     store.save(LAYOUT_CON_WHEN)
     _con_player(fake_ex, False)
     probe.refresh()
-    assert client.get("/layout?page=1", headers=AUTH).status_code == 404
-    assert client.get("/screen/1.png", headers=AUTH).status_code == 404
+    body = client.get("/layout?page=1", headers=AUTH).json()
+    assert body["page"] == 0
+    assert body["pages"] == ["Sempre"]
+    assert client.get("/screen/1.png", headers=AUTH).status_code == 200
 
 
 def test_se_nessuna_pagina_e_visibile_si_mostrano_tutte(ctx):
@@ -379,10 +403,13 @@ def test_la_schermata_riflette_la_pagina_visibile_giusta(ctx):
     store.save(LAYOUT_CON_WHEN)
     _con_player(fake_ex, True)
     probe.refresh()
-    assert client.get("/screen/1.png", headers=AUTH).status_code == 200
+    con_player = client.get("/screen/1.png", headers=AUTH)
+    assert con_player.status_code == 200
     _con_player(fake_ex, False)
     probe.refresh()
-    assert client.get("/screen/1.png", headers=AUTH).status_code == 404
+    senza = client.get("/screen/1.png", headers=AUTH)
+    assert senza.status_code == 200
+    assert senza.content != con_player.content   # ripiega sulla pagina 0
 
 
 def test_la_versione_efficace_e_stabile_fra_processi(tmp_path, fake_ex):

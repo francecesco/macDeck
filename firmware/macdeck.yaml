@@ -207,8 +207,9 @@ script:
             then:
               - lambda: |-
                   if (response->status_code != 200) {
-                    ESP_LOGW("macdeck", "/layout ha risposto %d",
-                             response->status_code);
+                    ESP_LOGW("macdeck", "/layout ha risposto %d, torno alla "
+                             "pagina 0", response->status_code);
+                    id(current_page) = 0;
                     return;
                   }
                   lv_obj_t *hits[12] = {
@@ -220,6 +221,9 @@ script:
                   json::parse_json(body, [&](JsonObject root) -> bool {
                     id(layout_version) = root["version"] | -1;
                     id(page_count) = root["pages"].size();
+                    // Autoritativa: il server puo' aver riportato l'indice
+                    // dentro l'intervallo se la pagina corrente e' sparita.
+                    id(current_page) = root["page"] | 0;
                     screen_url = std::string(root["screen"] | "");
                     for (JsonObject s : root["slots"].as<JsonArray>()) {
                       int i = s["i"] | -1;
@@ -312,9 +316,14 @@ script:
 
                     // Il canale che serve per volume e brano trasporta anche
                     // l'invalidazione della cache: nessun push da progettare.
+                    //
+                    // NON si aggiorna qui id(layout_version): la versione va
+                    // registrata solo quando fetch_layout e' RIUSCITO. Averla
+                    // registrata prima significava che un solo fallimento
+                    // (es. la pagina corrente sparita, 404) cristallizzava il
+                    // display su un layout vecchio per sempre.
                     int v = root["layout_version"] | -1;
                     if (v != id(layout_version)) {
-                      id(layout_version) = v;
                       id(fetch_layout).execute();
                     }
                     return true;

@@ -124,6 +124,11 @@ theme:
   font: SFNS
   icon_scale: 1.0        # moltiplicatore della dimensione dell'icona
 pages:
+  - name: Media
+    when: media.app          # la pagina compare solo se c'è un player attivo
+    grid: {cols: 3, rows: 2}
+    slots: []
+
   - name: Dev
     slots:
       - pos: [0, 0]                       # colonna, riga

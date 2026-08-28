@@ -95,11 +95,23 @@ def create_app(
         )
         return (store.version ^ marchio) & 0x7FFFFFFF
 
-    def _page(index: int) -> dict:
+    def _page_index(requested: int) -> int:
+        """Riporta l'indice richiesto dentro l'intervallo valido.
+
+        Non e' permissivita': e' il protocollo. La pagina corrente del display
+        diventa invalida ogni volta che l'insieme delle pagine visibili si
+        restringe, e con `when:` succede di continuo. Rispondere 404 lasciava
+        il display bloccato per sempre su una pagina sparita, perche' non
+        aveva modo di sapere dove andare. Il server lo riporta in carreggiata
+        e glielo dice nel campo "page" della risposta.
+        """
         pages = _visible_pages()
-        if not 0 <= index < len(pages):
-            raise HTTPException(status_code=404, detail=f"pagina {index} inesistente")
-        return pages[index]
+        if not pages:
+            raise HTTPException(status_code=503, detail="nessuna pagina")
+        return max(0, min(requested, len(pages) - 1))
+
+    def _page(index: int) -> dict:
+        return _visible_pages()[_page_index(index)]
 
     def _slot(page_index: int, slot_index: int) -> dict:
         page = _page(page_index)
@@ -116,11 +128,14 @@ def create_app(
     @app.get("/layout", dependencies=[Depends(require_token)])
     def get_layout(page: int = 0) -> dict:
         visibili = _visible_pages()
-        p = _page(page)
+        page = _page_index(page)
+        p = visibili[page]
         theme = store.layout["theme"]
         version = _effective_version(visibili)
         return {
             "version": version,
+            # Autoritativo: il display DEVE adottare questo valore, perche'
+            # puo' differire da quello che ha chiesto.
             "page": page,
             "pages": [q["name"] for q in visibili],
             "grid": p["grid"],
@@ -155,7 +170,8 @@ def create_app(
         dodici. Vedi render.render_screen per il perche'.
         """
         visibili = _visible_pages()
-        p = _page(page)
+        page = _page_index(page)
+        p = visibili[page]
         key = (page, _effective_version(visibili))
         png = screens.get(key)
         if png is None:
