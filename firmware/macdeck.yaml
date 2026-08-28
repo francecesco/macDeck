@@ -80,6 +80,13 @@ wifi:
 
 captive_portal:
 
+# Ripiego quando anche il portale non basta: col cavo dati collegato al Mac,
+# `macdeck pair --usb` passa la rete al deck sulla seriale. Non serve
+# ricompilare niente e non dipende dal WiFi, che e' proprio la cosa rotta
+# quando serve. Il cavo resta necessario solo per questo: subito dopo il deck
+# torna a lavorare in WiFi con la sola alimentazione.
+improv_serial:
+
 mdns:
 
 api:

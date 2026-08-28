@@ -235,6 +235,37 @@ telefono e gli si passa la rete nuova dal portale.
 Col Mac spento il deck resta acceso e rallenta i tentativi a uno ogni
 quattordici secondi; quando il Mac torna, riparte da solo.
 
+### Una rete nuova, sul momento
+
+In un posto dove il Mac si attacca al WiFi del luogo, il deck quella rete non
+la conosce. Un comando:
+
+```bash
+macdeck pair
+```
+
+Legge la rete a cui sei collegato e la sua password dal portachiavi (macOS
+chiede conferma la prima volta), la passa al deck e torna sulla rete di
+prima. Il Mac resta senza rete per una ventina di secondi. Il deck la
+ricorda: la volta dopo, in quel posto, si collega da solo.
+
+Se non funziona — l'access point del deck non si vede, o il Mac non riesce a
+spostarsi — c'è il cavo:
+
+```bash
+macdeck pair --usb
+```
+
+Serve un cavo **dati** (molti cavi da ricarica non hanno i fili per i dati).
+Il cavo serve solo per quel passaggio: subito dopo il deck torna in WiFi con
+la sola alimentazione.
+
+**Un caso in cui non funziona niente:** su molte reti pubbliche — alberghi,
+aeroporti — il router impedisce ai dispositivi collegati di parlarsi fra
+loro. Mac e deck finiscono sulla stessa rete e restano invisibili l'uno
+all'altro. Lì l'unica via è l'hotspot del telefono, con entrambi attaccati a
+quello.
+
 `macdeck doctor` dice se il deck è stato trovato, quale indirizzo gli è stato
 annunciato, e se il firewall di macOS è attivo — che fuori casa è la causa
 più frequente di un deck che sembra irraggiungibile.

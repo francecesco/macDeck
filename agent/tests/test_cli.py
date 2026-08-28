@@ -50,3 +50,16 @@ def test_doctor_riporta_lo_stato_dell_annuncio(tmp_path, capsys):
     cli.main(["doctor", "--root", str(tmp_path)])
     out = capsys.readouterr().out
     assert "deck" in out.lower()
+
+
+def test_pair_senza_cavo_lo_dice_e_non_esplode(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr("pathlib.Path.glob", lambda self, pat: iter([]))
+    rc = cli.main(["pair", "--usb", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "cavo dati" in out
+
+
+def test_pair_e_registrato_fra_i_comandi(capsys):
+    rc = cli.main(["--help"])
+    assert "pair" in capsys.readouterr().out

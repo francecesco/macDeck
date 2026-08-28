@@ -479,13 +479,76 @@ uno slot libero serve un **segnaposto**: il deck sceglie fra le reti che
 effettivamente vede, quindi un SSID inesistente non costa nulla e non viene
 mai tentato.
 
+### Insegnare al deck una rete che non esisteva alla compilazione
+
+Fuori casa il Mac si attacca al WiFi del posto, e quella password non
+esisteva quando il firmware è stato compilato. Il pezzo che serviva c'era
+già: il portale del deck espone `/wifisave?ssid=…&psk=…` e ESPHome salva
+quelle credenziali **in modo permanente**. `macdeck pair` si limita a
+guidarlo al posto nostro.
+
+La regola che governa `pairing.py` è una sola, e vale più del resto:
+
+> **La rete di partenza va ripristinata sempre**, in un `finally`, anche
+> quando tutto il resto fallisce.
+
+Il comando stacca il Mac dalla sua rete per attaccarlo all'access point del
+deck. Un Mac lasciato appeso al WiFi di un display è un guaio peggiore di un
+accoppiamento non riuscito — e per lo stesso motivo, **senza la password
+della rete di partenza il giro non comincia nemmeno**: staccarsi senza
+saperla significa non poterci più tornare.
+
+Due trappole di macOS lungo la strada:
+
+- Da macOS 14 `networksetup -getairportnetwork` risponde *"You are not
+  associated with an AirPort network"* **anche quando lo sei**: il nome della
+  rete è diventato un dato protetto. Si legge da `ipconfig getsummary en0`.
+- Il parsing di quell'output va ancorato a `^\s*SSID`, altrimenti la riga
+  `BSSID :` viene prima e si finisce con l'indirizzo hardware al posto del
+  nome. C'è un test apposta.
+
+### Il ripiego sul cavo, quando è il WiFi a non funzionare
+
+`macdeck pair` fallisce proprio nei casi in cui l'access point del deck non
+si vede o il Mac non riesce a spostarsi di rete — cioè quando il problema è
+il WiFi. Il ripiego non può quindi passare dal WiFi.
+
+`improv_serial:` (una riga nel firmware) apre un canale sul cavo dati.
+ESPHome non offre un comando per usarlo, quindi il client sta in
+`pairing.improv_packet` / `pair_over_usb`: il protocollo è
+`"IMPROV" | versione | tipo | lunghezza | corpo | checksum`, con ogni stringa
+preceduta dalla propria lunghezza in **un byte** — da cui il limite di 255
+caratteri, che va verificato prima e non scoperto dopo.
+
+Sulla stessa porta viaggiano anche i log dell'ESP: il parser cerca
+l'intestazione nel rumore e **verifica il checksum**, invece di assumere un
+flusso pulito.
+
+Il cavo serve solo per questo passaggio. Subito dopo il deck torna in WiFi
+con la sola alimentazione.
+
+### Quello che resta scoperto: l'isolamento dei client
+
+Su molte reti pubbliche — alberghi, aeroporti, catene di bar — il router
+impedisce ai dispositivi collegati di parlarsi fra loro. Lì Mac e deck
+finiscono sulla stessa rete e **restano comunque invisibili l'uno
+all'altro**: nessun accoppiamento può rimediare, perché non è un problema di
+credenziali.
+
+L'unica via è una rete propria, cioè l'hotspot del telefono con entrambi
+attaccati. Farlo funzionare sulle reti isolate richiederebbe un secondo
+trasporto completo sul cavo, immagine compresa: è un progetto a sé, non un
+ripiego.
+
 ## Comandi utili
 
 ```bash
 cd agent
-.venv/bin/python -m pytest                        # 220 test, nessun hardware
+.venv/bin/python -m pytest                        # 248 test, nessun hardware
 .venv/bin/python -m macdeck.cli doctor            # permessi e configurazione
 .venv/bin/python -m macdeck.cli token             # token da mettere nei secrets
+.venv/bin/python -m macdeck.cli pair              # insegna al deck la rete di adesso
+.venv/bin/python -m macdeck.cli pair --usb        # idem, sul cavo dati
 .venv/bin/python -m macdeck.cli serve             # server in foreground
 
 cd firmware

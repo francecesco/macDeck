@@ -8,6 +8,7 @@ tasti semplicemente non arrivano.
 from __future__ import annotations
 
 import argparse
+import time
 import json
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from .app import create_app
 from .executor import Executor
 from .layout import LayoutStore
 from .render import TileCache
+from . import pairing
 from .discovery import Announcer, firewall_state, read_secret
 from .state import ACCESSIBILITY_SCRIPT, StateProbe
 
@@ -216,6 +218,62 @@ def _token(args) -> int:
     return 0
 
 
+def _pair(args) -> int:
+    """Insegna al deck la rete a cui il Mac e' attaccato adesso."""
+    ex = Executor()
+
+    if args.usb:
+        porte = sorted(Path("/dev").glob("cu.usbmodem*"))
+        porta = args.port or (str(porte[0]) if porte else None)
+        if not porta:
+            print("  KO   nessun cavo dati trovato in /dev/cu.usbmodem*")
+            print("       Collega il deck al Mac con un cavo DATI: molti cavi")
+            print("       da ricarica non hanno i fili per i dati.")
+            return 1
+        ssid = args.ssid or pairing.current_ssid(ex)
+        if not ssid:
+            print("  KO   il Mac non risulta collegato a nessun WiFi")
+            return 1
+        psk = args.password or pairing.wifi_password(ex, ssid)
+        if not psk:
+            print(f"  KO   password di '{ssid}' non leggibile dal portachiavi")
+            print("       Riprova con --password 'la-password'")
+            return 1
+        print(f"  --   passo '{ssid}' al deck sul cavo {porta}...")
+        esito = pairing.pair_over_usb(porta, ssid, psk)
+    else:
+        ssid_ora = pairing.current_ssid(ex)
+        print(f"  --   rete attuale: {ssid_ora or 'nessuna'}")
+        print("  --   il Mac restera' senza rete per una ventina di secondi.")
+        esito = pairing.pair_over_wifi(ex, password=args.password)
+
+    if not esito.ok:
+        print(f"  KO   {esito.error}")
+        if not args.usb:
+            print("       Ripiego: collega il cavo dati e usa `macdeck pair --usb`.")
+        return 1
+
+    print(f"  OK   rete '{esito.ssid}' passata al deck")
+    print("  --   aspetto che si faccia vivo...")
+    for _ in range(12):
+        time.sleep(2.5)
+        trovato = discovery_find()
+        if trovato:
+            print(f"  OK   deck in rete su {trovato}")
+            return 0
+    print("  --   non si e' ancora visto. Puo' metterci qualche secondo in piu';")
+    print("       `macdeck doctor` dice se e' arrivato.")
+    return 0
+
+
+def discovery_find():
+    from .discovery import find_deck
+    try:
+        return find_deck(4.0)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="macdeck")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -226,10 +284,20 @@ def main(argv: list[str] | None = None) -> int:
         ("install-agent", _install_agent, "installa il LaunchAgent"),
         ("uninstall-agent", _uninstall_agent, "rimuove il LaunchAgent"),
         ("token", _token, "stampa il token condiviso"),
+        ("pair", _pair, "insegna al deck la rete WiFi di adesso"),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--root", type=Path, default=None,
                        help="directory di configurazione alternativa (per i test)")
+        if name == "pair":
+            p.add_argument("--usb", action="store_true",
+                           help="passa la rete sul cavo dati invece che via WiFi")
+            p.add_argument("--port", default=None,
+                           help="porta seriale (di norma si trova da sola)")
+            p.add_argument("--ssid", default=None,
+                           help="rete da passare (di norma quella attuale)")
+            p.add_argument("--password", default=None,
+                           help="password della rete, se il portachiavi non la da'")
         p.set_defaults(func=fn)
     try:
         args = parser.parse_args(argv)
