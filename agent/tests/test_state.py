@@ -196,3 +196,36 @@ def test_una_sonda_che_esplode_non_uccide_il_thread(fake_ex, monkeypatch):
     assert p._thread.is_alive()
     assert boom["n"] > 1
     p.stop()
+
+
+# ---------------------------- diniego vero contro sonda che non riesce a girare
+
+
+def test_un_diniego_vero_viene_riportato(fake_ex):
+    fake_ex.replies = {"first process": R(
+        False, error="System Events got an error: ... (-1743)")}
+    assert _probe(fake_ex).refresh()["accessibility_ok"] is False
+
+
+def test_un_timeout_non_e_un_diniego(fake_ex):
+    """Il difetto che faceva comparire l'allarme rosso sul display mentre il
+    Mac compilava: con load average 40 osascript sfora il timeout, e trattarlo
+    come diniego e' un falso allarme."""
+    p = _probe(fake_ex, accessibility_interval=0)
+    fake_ex.replies = {"first process": R(True, out="loginwindow\n")}
+    assert p.refresh()["accessibility_ok"] is True
+    fake_ex.replies = {"first process": R(False, error="timeout dopo 3.0s: osascript")}
+    assert p.refresh()["accessibility_ok"] is True      # tiene l'ultimo noto
+
+
+def test_esito_incerto_senza_storia_e_ottimista(fake_ex):
+    fake_ex.replies = {"first process": R(False, error="qualcosa di strano")}
+    assert _probe(fake_ex).refresh()["accessibility_ok"] is True
+
+
+def test_dopo_un_diniego_un_successo_lo_annulla(fake_ex):
+    p = _probe(fake_ex, accessibility_interval=0)
+    fake_ex.replies = {"first process": R(False, error="not authorized")}
+    assert p.refresh()["accessibility_ok"] is False
+    fake_ex.replies = {"first process": R(True, out="Finder\n")}
+    assert p.refresh()["accessibility_ok"] is True

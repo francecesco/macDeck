@@ -38,6 +38,17 @@ ACCESSIBILITY_SCRIPT = (
     'tell application "System Events" to return name of first process'
 )
 
+# Come si riconosce un diniego VERO. Serve perche' "la sonda non e' riuscita a
+# girare" e "il permesso e' negato" sono cose diverse: con il Mac sotto carico
+# osascript va in timeout, e trattare quel timeout come diniego faceva
+# comparire sul display un allarme rosso falso proprio nei momenti peggiori.
+ACCESS_DENIED_MARKERS = (
+    "-1743",            # errAEEventNotPermitted
+    "not allowed",
+    "not authorized",
+    "assistive",
+)
+
 
 def _media_script() -> str:
     branches = []
@@ -207,7 +218,20 @@ class StateProbe:
         }
 
     def _accessibility(self, now: float) -> bool:
-        if self._acc is None or now - self._acc_at >= self.accessibility_interval:
-            self._acc = self.ex.osascript(ACCESSIBILITY_SCRIPT, timeout=3.0).ok
-            self._acc_at = now
+        """Vero se i tasti si possono inviare.
+
+        In caso di esito incerto NON si dichiara il diniego: si tiene
+        l'ultimo valore noto, e in mancanza si sta ottimisti. Un avviso rosso
+        falso e' peggio di un avviso mancante, perche' insegna a ignorarlo.
+        """
+        if self._acc is not None and now - self._acc_at < self.accessibility_interval:
+            return self._acc
+        self._acc_at = now
+        esito = self.ex.osascript(ACCESSIBILITY_SCRIPT, timeout=10.0)
+        if esito.ok:
+            self._acc = True
+        elif any(m in (esito.error or "").lower() for m in ACCESS_DENIED_MARKERS):
+            self._acc = False
+        elif self._acc is None:
+            self._acc = True
         return self._acc

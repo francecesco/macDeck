@@ -33,11 +33,9 @@ esphome:
   name: ${name}
   friendly_name: MacDeck
   min_version: 2026.5.0
-  on_boot:
-    - priority: -100
-      then:
-        - delay: 3s
-        - script.execute: fetch_layout
+  # Niente caricamento a tempo sul boot: 3 secondi non bastano sempre a
+  # associarsi al WiFi, e in quel caso la richiesta falliva e la schermata
+  # non veniva MAI disegnata. Si parte quando la rete c'e' davvero.
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -65,6 +63,9 @@ wifi:
   password: !secret wifi_password
   ap:
     ssid: "MacDeck Fallback"
+  on_connect:
+    then:
+      - script.execute: fetch_layout
 
 captive_portal:
 
@@ -122,9 +123,10 @@ touchscreen:
     id: main_touch
     i2c_id: touch_bus
     display: main_display
+    # Nessun risveglio al tocco da gestire: lo schermo non si spegne mai da
+    # solo. Se la retroilluminazione viene spenta a comando, il tocco la
+    # riaccende comunque senza far scattare il pulsante sotto.
     on_touch:
-      # Il primo tocco a schermo spento riaccende e NON preme nulla: LVGL e'
-      # in pausa, quindi l'evento non raggiunge nessun widget.
       - if:
           condition:
             lambda: 'return !id(backlight).current_values.is_on();'
@@ -160,6 +162,10 @@ globals:
     type: int
     restore_value: false
     initial_value: "0"
+  - id: serve_layout
+    type: bool
+    restore_value: false
+    initial_value: "false"
   - id: accessibilita_ok
     type: bool
     restore_value: false
@@ -314,9 +320,7 @@ script:
                     // (es. la pagina corrente sparita, 404) cristallizzava il
                     // display su un layout vecchio per sempre.
                     int v = root["layout_version"] | -1;
-                    if (v != id(layout_version)) {
-                      id(fetch_layout).execute();
-                    }
+                    if (v != id(layout_version)) id(serve_layout) = true;
                     return true;
                   });
           on_error:
@@ -324,6 +328,16 @@ script:
               - lambda: |-
                   id(fail_streak)++;
                   if (id(fail_streak) >= 3) id(agent_online) = false;
+      # Fuori dal gestore di risposta: lanciare una seconda richiesta HTTP da
+      # dentro il callback della prima non funziona, il componente e' occupato.
+      # Con la bandiera il tentativo si ripete al ciclo dopo se fallisce,
+      # quindi il deck si ripara da solo invece di restare nero per sempre.
+      - if:
+          condition:
+            lambda: 'return id(serve_layout);'
+          then:
+            - lambda: 'id(serve_layout) = false;'
+            - script.execute: fetch_layout
       - lambda: |-
           // L'avviso e' l'unica cosa che ruba spazio alle tile, quindi si
           // mostra solo quando c'e' davvero qualcosa da dire.
@@ -379,11 +393,11 @@ lvgl:
   # Rotazione SOFTWARE: il driver non ha quella hardware. Ruota anche il touch.
   rotation: 90
   bg_color: 0x12141A
-  on_idle:
-    timeout: 5min
-    then:
-      - light.turn_off: backlight
-      - lvgl.pause:
+  # Nessuno spegnimento per inattivita': il display sta su una scrivania,
+  # alimentato dal cavo, e serve che le icone si vedano sempre. Senza cavo
+  # non c'e' batteria e quindi non c'e' niente da risparmiare. La
+  # retroilluminazione resta comunque un'entita' controllabile ("backlight"),
+  # quindi si puo' sempre spegnere a comando se un giorno serve.
   top_layer:
     widgets:
       # Nessuna fascia fissa: volume, brano e CPU erano decorazione e

@@ -321,6 +321,51 @@ slot risolti, flag della navbar. Così qualunque cosa cambi l'aspetto del deck
 cambia la versione, senza doverci pensare caso per caso — ed è la lezione dei
 tre bug di versione che l'hanno preceduta.
 
+### Il primo caricamento non può partire a tempo
+
+`on_boot: delay: 3s` non basta: associarsi al WiFi ne richiede sei, la
+richiesta falliva con `HTTP Request failed; Not connected to network`, e la
+schermata non veniva **mai** disegnata. Si parte da `wifi: on_connect:`.
+
+### Non lanciare una richiesta HTTP da dentro il callback di un'altra
+
+`fetch_state` chiamava `id(fetch_layout).execute()` da dentro il proprio
+`on_response`. Il componente `http_request` è occupato con la richiesta in
+corso e la seconda non parte — silenziosamente, senza errore.
+
+Il difetto è rimasto coperto a lungo perché la schermata arrivava comunque dal
+caricamento al boot. Quando quello è fallito (vedi sopra), è saltato fuori che
+**non esisteva nessun ritentativo**: il display è rimasto nero in modo
+permanente.
+
+La correzione è una bandiera: il confronto di versione alza `serve_layout`, e
+la si guarda **dopo** che la richiesta è finita, fuori dal callback. Come
+effetto secondario il deck si ripara da solo, perché un tentativo fallito
+viene ripetuto al ciclo dopo — verificato sul dispositivo, dove un
+`Connection reset` durante il riavvio dell'agent è stato recuperato al ciclo
+successivo.
+
+### Una sonda che non riesce a girare non è un permesso negato
+
+`_accessibility` faceva `return osascript(...).ok`, quindi un **timeout**
+diventava "permesso negato". Con il Mac sotto carico (load average 40 durante
+una compilazione) osascript sfora i 3 secondi, e sul display compariva un
+allarme rosso falso: *"Permesso Accessibilità mancante"* mentre il permesso
+c'era eccome.
+
+Ora si distingue: un diniego vero si riconosce dal messaggio d'errore
+(`-1743`, `not allowed`, `not authorized`, `assistive`); qualunque altro esito
+è **incerto**, e in caso di incertezza si tiene l'ultimo valore noto — in
+mancanza, si sta ottimisti. Un avviso falso è peggio di un avviso mancante,
+perché insegna a ignorarlo.
+
+### Niente spegnimento per inattività
+
+Il display sta su una scrivania, alimentato dal cavo, e senza cavo non c'è
+batteria: non c'è niente da risparmiare. `on_idle` è stato rimosso. La
+retroilluminazione resta un'entità controllabile, quindi si può sempre
+spegnere a comando.
+
 ## Comandi utili
 
 ```bash
