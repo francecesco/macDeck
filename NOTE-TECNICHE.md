@@ -276,6 +276,37 @@ permanente e silenzioso.
 `id(layout_version)` va scritto **solo** dentro il ramo di successo di
 `fetch_layout`. `fetch_state` confronta e innesca, non registra.
 
+### `when:` vale sugli slot, non solo sulle pagine
+
+Stesso campo a due livelli, perché è lo stesso concetto: un percorso dentro
+`/state` che, se veritiero, rende visibile qualcosa.
+
+Sugli **slot** serve a far cambiare contenuto a una casella: la riga in basso
+mostra Slack / Spotify / Screenshot normalmente, e diventa ⏮ ⏯ ⏭ quando c'è un
+player attivo. Più slot condividono la stessa `pos`, e la regola è
+**order-independent**: a parità di casella vince quello condizionale
+soddisfatto; se nessuno lo è, vince quello senza condizione. Due slot
+incondizionati sulla stessa casella restano un errore di validazione, perché
+quello è un refuso e non un'intenzione.
+
+### La geometria non si può calcolare in validazione
+
+`slot_boxes` dipende da `navbar`, che dipende da quante pagine sono **visibili**,
+che dipende dallo stato vivo del Mac. Per questo `validate()` calcola solo
+`index` e il `box` si calcola al momento di servire la richiesta.
+
+Con una pagina sola la navbar sparisce e i suoi 28 px vanno alle tile: la
+griglia 3×3 passa da 154×80 a 154×89. Il firmware deve nascondere le due aree
+di tocco delle frecce quando `/layout` risponde `"nav": false`, altrimenti
+restano sopra la riga in basso e rubano i tocchi.
+
+### La versione è l'impronta del risultato, non del file
+
+`_signature()` fa l'hash di **ciò che il display riceverebbe**: pagine visibili,
+slot risolti, flag della navbar. Così qualunque cosa cambi l'aspetto del deck
+cambia la versione, senza doverci pensare caso per caso — ed è la lezione dei
+tre bug di versione che l'hanno preceduta.
+
 ## Comandi utili
 
 ```bash

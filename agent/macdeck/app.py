@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -61,41 +62,57 @@ def create_app(
             return
         raise HTTPException(status_code=403, detail="solo da localhost")
 
-    def _visible_pages() -> list[dict]:
-        """Le pagine effettivamente mostrate adesso.
+    def _resolve() -> tuple[list[dict], bool]:
+        """Cosa il display deve mostrare adesso: pagine e slot gia' risolti.
 
-        Una pagina con `when:` compare solo se quel percorso dentro /state e'
-        veritiero: e' cosi' che i comandi multimediali appaiono soltanto
-        quando c'e' davvero un player in esecuzione. Se il filtro non lascia
-        nulla si mostra tutto, perche' un deck vuoto e' peggio di un deck
-        con una pagina di troppo.
+        Tre cose si decidono qui, tutte dipendenti dallo stato vivo del Mac e
+        quindi impossibili da precalcolare in validate():
+
+        - quali PAGINE sono visibili (`when:` sulla pagina);
+        - quali SLOT occupano ciascuna casella (`when:` sullo slot): e' cosi'
+          che la riga in basso diventa i comandi multimediali quando c'e' un
+          player attivo, e torna alle app quando non c'e';
+        - se serve la NAVBAR, che con una pagina sola sparisce e restituisce
+          i suoi 28 px alle tile.
         """
         stato = probe.snapshot()
-        pages = store.layout["pages"]
-        visibili = [
-            p for p in pages
+        pagine = [
+            p for p in store.layout["pages"]
             if not p.get("when") or bool(value_at(stato, p["when"]))
-        ]
-        return visibili or pages
+        ] or store.layout["pages"]
+        navbar = len(pagine) > 1
 
-    def _effective_version(visibili: list[dict]) -> int:
-        """Cambia sia quando cambia il layout sia quando cambia cosa e' visibile.
+        risolte = []
+        for pagina in pagine:
+            boxes = L.slot_boxes(pagina["grid"], navbar=navbar)
+            scelti: dict[int, dict] = {}
+            for slot in pagina["slots"]:
+                cond = slot.get("when")
+                attivo = bool(cond) and bool(value_at(stato, cond))
+                if cond and not attivo:
+                    continue
+                prima = scelti.get(slot["index"])
+                if prima is not None and not (attivo and prima.get("when") is None):
+                    continue      # a parita' di casella vince il condizionale
+                scelti[slot["index"]] = {**slot, "box": boxes[slot["index"]]}
+            risolte.append({**pagina, "slots": [scelti[i] for i in sorted(scelti)]})
+        return risolte, navbar
 
-        Senza il secondo pezzo, l'apparire della pagina Media non farebbe
-        ricaricare il display.
+    def _signature(risolte: list[dict], navbar: bool) -> int:
+        """Versione = impronta di CIO' CHE IL DISPLAY RICEVEREBBE.
 
-        NON si usa hash() di Python: il suo hash delle stringhe e'
-        randomizzato a ogni processo, quindi la versione cambierebbe a ogni
-        riavvio dell'agent anche a layout identico — esattamente il difetto
-        che content_version() serviva a togliere.
+        Non del file, non dell'elenco delle pagine: del risultato risolto.
+        Cosi' qualunque cosa cambi l'aspetto del deck — un layout salvato, una
+        pagina che compare, uno slot condizionale che si attiva, la navbar che
+        sparisce — cambia la versione, senza doverci pensare caso per caso.
+
+        Niente hash() di Python: e' randomizzato per processo e la versione
+        cambierebbe a ogni riavvio dell'agent a parita' di contenuto.
         """
-        nomi = "|".join(p["name"] for p in visibili)
-        marchio = int(
-            hashlib.sha256(nomi.encode()).hexdigest()[:8], 16
-        )
-        return (store.version ^ marchio) & 0x7FFFFFFF
+        payload = json.dumps([risolte, navbar], sort_keys=True, ensure_ascii=False)
+        return int(hashlib.sha256(payload.encode()).hexdigest()[:8], 16)
 
-    def _page_index(requested: int) -> int:
+    def _page_index(requested: int, risolte: list[dict]) -> int:
         """Riporta l'indice richiesto dentro l'intervallo valido.
 
         Non e' permissivita': e' il protocollo. La pagina corrente del display
@@ -105,16 +122,13 @@ def create_app(
         aveva modo di sapere dove andare. Il server lo riporta in carreggiata
         e glielo dice nel campo "page" della risposta.
         """
-        pages = _visible_pages()
-        if not pages:
+        if not risolte:
             raise HTTPException(status_code=503, detail="nessuna pagina")
-        return max(0, min(requested, len(pages) - 1))
-
-    def _page(index: int) -> dict:
-        return _visible_pages()[_page_index(index)]
+        return max(0, min(requested, len(risolte) - 1))
 
     def _slot(page_index: int, slot_index: int) -> dict:
-        page = _page(page_index)
+        risolte, _navbar = _resolve()
+        page = risolte[_page_index(page_index, risolte)]
         for slot in page["slots"]:
             if slot["index"] == slot_index:
                 return slot
@@ -127,17 +141,19 @@ def create_app(
 
     @app.get("/layout", dependencies=[Depends(require_token)])
     def get_layout(page: int = 0) -> dict:
-        visibili = _visible_pages()
-        page = _page_index(page)
-        p = visibili[page]
+        risolte, navbar = _resolve()
+        page = _page_index(page, risolte)
+        p = risolte[page]
         theme = store.layout["theme"]
-        version = _effective_version(visibili)
+        version = _signature(risolte, navbar)
         return {
             "version": version,
+            # Con una pagina sola il firmware deve nascondere le frecce.
+            "nav": navbar,
             # Autoritativo: il display DEVE adottare questo valore, perche'
             # puo' differire da quello che ha chiesto.
             "page": page,
-            "pages": [q["name"] for q in visibili],
+            "pages": [q["name"] for q in risolte],
             "grid": p["grid"],
             "background": theme["background"],
             "accent": theme["accent"],
@@ -169,16 +185,16 @@ def create_app(
         E' cio' che il firmware scarica davvero: una richiesta invece di
         dodici. Vedi render.render_screen per il perche'.
         """
-        visibili = _visible_pages()
-        page = _page_index(page)
-        p = visibili[page]
-        key = (page, _effective_version(visibili))
+        risolte, navbar = _resolve()
+        page = _page_index(page, risolte)
+        p = risolte[page]
+        key = (page, _signature(risolte, navbar))
         png = screens.get(key)
         if png is None:
             png = render.screen_png(
                 p, store.layout["theme"],
-                page_index=page, page_count=len(visibili),
-                root=root,
+                page_index=page, page_count=len(risolte),
+                navbar=navbar, root=root,
             )
             screens.clear()          # una sola versione per volta in memoria
             screens[key] = png
@@ -208,7 +224,7 @@ def create_app(
     def get_state() -> dict:
         return {
             **probe.snapshot(),
-            "layout_version": _effective_version(_visible_pages()),
+            "layout_version": _signature(*_resolve()),
             "layout_error": store.error,
         }
 
@@ -291,7 +307,7 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(e)) from e
         slot = dict(body.get("slot") or {})
         pos = slot.get("pos") or [0, 0]
-        boxes = L.slot_boxes(grid)
+        boxes = L.slot_boxes(grid, navbar=bool(body.get("navbar", False)))
         index = L.slot_index(pos, grid)
         slot["box"] = boxes.get(index) or next(iter(boxes.values()))
         theme = {**store.layout["theme"], **(body.get("theme") or {})}

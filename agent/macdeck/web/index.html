@@ -128,9 +128,13 @@ textarea{min-height:76px;font-family:ui-monospace,Menlo,monospace;font-size:12.5
 // 480x320 landscape, ed e' in quello che si ragiona qui.
 const DW=480, DH=320, HEADER=36, NAVBAR=28, GUT=4, MAX_SLOTS=12;
 
-function slotBoxes(grid){
+// La navbar esiste solo con piu' di una pagina: senza, i suoi 28 px vanno
+// alle tile. Stessa regola del server (layout.slot_boxes).
+function hasNav(){ return model && model.pages.length > 1; }
+
+function slotBoxes(grid, navbar){
   const cols=grid.cols, rows=grid.rows;
-  const areaH = DH - HEADER - NAVBAR;
+  const areaH = DH - HEADER - (navbar ? NAVBAR : 0);
   const w = Math.floor((DW - (cols+1)*GUT)/cols);
   const h = Math.floor((areaH - (rows+1)*GUT)/rows);
   const out={};
@@ -166,7 +170,13 @@ const ACTION_FIELDS = {
 
 function gridOf(p){ return p.grid || model.grid; }
 function curPage(){ return model.pages[sel.page]; }
-function slotAt(p,i){ const g=gridOf(p); return p.slots.find(s=>idxOf(s.pos,g)===i); }
+function slotsAt(p,i){ const g=gridOf(p); return p.slots.filter(s=>idxOf(s.pos,g)===i); }
+function slotAt(p,i){
+  // A parita' di casella la GUI mostra il condizionale se c'e', perche' e'
+  // quello che il display mostrera' quando la condizione scatta.
+  const tutti=slotsAt(p,i);
+  return tutti.find(s=>s.when) || tutti[0];
+}
 
 function toRaw(res){
   return {
@@ -177,6 +187,7 @@ function toRaw(res){
         const o={pos:s.pos, label:s.label, icon:s.icon, action:s.action};
         if(s.color) o.color=s.color;
         if(s.state) o.state=s.state;
+        if(s.when) o.when=s.when;
         if(s.timeout_ms) o.timeout_ms=s.timeout_ms;
         return o;
       })
@@ -228,7 +239,7 @@ async function checkAccess(){
 
 // ----------------------------------------------------------------- anteprima
 async function render(){
-  const p = curPage(), g = gridOf(p), boxes = slotBoxes(g);
+  const p = curPage(), g = gridOf(p), boxes = slotBoxes(g, hasNav());
   document.getElementById('gridInfo').textContent =
     `griglia ${g.cols}×${g.rows} — tile ${boxes[0].w}×${boxes[0].h} px`;
 
@@ -246,7 +257,9 @@ async function render(){
   sc.innerHTML =
     '<div class="chrome hdr"><span>62%</span><span style="flex:1"></span>'+
     '<span>cpu · bat</span></div>'+
-    `<div class="chrome nav">Pagina ${sel.page+1}/${model.pages.length}</div>`;
+    (hasNav()
+      ? `<div class="chrome nav">Pagina ${sel.page+1}/${model.pages.length}</div>`
+      : '');
 
   for(let i=0;i<g.cols*g.rows;i++){
     const b=boxes[i], s=slotAt(p,i);
@@ -260,6 +273,16 @@ async function render(){
     el.ondragover=ev=>ev.preventDefault();
     el.ondrop=ev=>{ ev.preventDefault(); moveSlot(dragFrom,i); };
     if(s){
+      const quanti=slotsAt(p,i).length;
+      if(quanti>1){
+        const b=document.createElement('div');
+        b.textContent=quanti;
+        b.title=quanti+' tile condividono questa casella';
+        b.style.cssText='position:absolute;top:2px;right:3px;z-index:2;'+
+          'background:var(--accent);color:#04121f;border-radius:99px;'+
+          'font-size:9px;padding:0 4px;font-weight:700';
+        el.appendChild(b);
+      }
       const img=document.createElement('img');
       tilePreview(s,g).then(u=>{ if(u) img.src=u; });
       el.appendChild(img);
@@ -279,7 +302,7 @@ async function tilePreview(slot,grid){
   try{
     const r=await fetch('/api/tile-preview',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({grid, slot, theme:model.theme})});
+      body:JSON.stringify({grid, slot, theme:model.theme, navbar:hasNav()})});
     if(!r.ok) return null;
     return URL.createObjectURL(await r.blob());
   }catch(e){ return null; }
@@ -332,6 +355,12 @@ function renderSlotPanel(){
     <input id="fState" placeholder="volume.muted">
     <div class="hint">Percorso dentro il JSON di <code>/state</code>: se il valore è
       vero il display disegna un bordo di accento.</div>
+    <label>Mostra solo se (opzionale)</label>
+    <input id="fWhen" placeholder="media.app">
+    <div class="hint">Stessa sintassi: la tile compare solo quando quel valore è
+      vero. Più tile possono condividere la stessa casella, purché al massimo
+      una sia senza condizione: è così che una casella diventa un comando
+      multimediale mentre suona qualcosa, e torna all'app quando smette.</div>
     <label>Azione</label>
     <select id="fType"></select>
     <div id="fFields"></div>
@@ -345,10 +374,12 @@ function renderSlotPanel(){
   q('fLabel').value=s.label||'';
   q('fIcon').value=s.icon||'';
   q('fState').value=s.state||'';
+  q('fWhen').value=s.when||'';
   q('fColor').value=s.color||model.theme.tile;
   q('fLabel').oninput=e=>{s.label=e.target.value;setDirty(true);refreshTile();};
   q('fIcon').oninput=e=>{s.icon=e.target.value;setDirty(true);refreshTile();};
   q('fState').oninput=e=>{s.state=e.target.value||undefined;setDirty(true);};
+  q('fWhen').oninput=e=>{s.when=e.target.value||undefined;setDirty(true);render();};
   q('fColor').oninput=e=>{s.color=e.target.value;setDirty(true);refreshTile();};
   q('fColorNo').onclick=()=>{delete s.color;setDirty(true);render();};
 

@@ -72,6 +72,8 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                 {"pos": [2, 1], "label": "Postman",
                  "icon": "app:/Applications/Postman.app",
                  "action": {"type": "app", "target": "Postman"}},
+
+                # --- riga in basso: app quando non c'e' musica ---
                 {"pos": [0, 2], "label": "Slack",
                  "icon": "app:/Applications/Slack.app",
                  "action": {"type": "app", "target": "Slack"}},
@@ -80,29 +82,18 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                  "action": {"type": "app", "target": "Spotify"}},
                 {"pos": [2, 2], "label": "Screenshot", "icon": "mdi:camera",
                  "action": {"type": "keys", "keys": "cmd+shift+4"}},
-            ],
-        },
-        {
-            # Compare solo quando c'e' davvero un player in esecuzione:
-            # aprendo Spotify dalla pagina Dev questa pagina si materializza
-            # da se' entro un ciclo di polling, e sparisce quando lo chiudi.
-            "name": "Media",
-            "when": "media.app",
-            "grid": {"cols": 3, "rows": 2},
-            "slots": [
-                {"pos": [0, 0], "label": "Indietro", "icon": "mdi:skip-previous",
+
+                # --- ...e comandi multimediali quando c'e'. Stesse caselle:
+                #     lo slot condizionale soddisfatto vince su quello sotto.
+                {"pos": [0, 2], "label": "Indietro", "icon": "mdi:skip-previous",
+                 "when": "media.app",
                  "action": {"type": "media", "op": "prev"}},
-                {"pos": [1, 0], "label": "Play / Pausa", "icon": "mdi:play-pause",
+                {"pos": [1, 2], "label": "Play / Pausa", "icon": "mdi:play-pause",
+                 "when": "media.app",
                  "action": {"type": "media", "op": "play_pause"}},
-                {"pos": [2, 0], "label": "Avanti", "icon": "mdi:skip-next",
+                {"pos": [2, 2], "label": "Avanti", "icon": "mdi:skip-next",
+                 "when": "media.app",
                  "action": {"type": "media", "op": "next"}},
-                {"pos": [0, 1], "label": "Volume -", "icon": "mdi:volume-minus",
-                 "action": {"type": "volume", "op": "down", "step": 8}},
-                {"pos": [1, 1], "label": "Muto", "icon": "mdi:volume-off",
-                 "action": {"type": "volume", "op": "mute_toggle"},
-                 "state": "volume.muted"},
-                {"pos": [2, 1], "label": "Volume +", "icon": "mdi:volume-plus",
-                 "action": {"type": "volume", "op": "up", "step": 8}},
             ],
         },
     ],
@@ -113,10 +104,16 @@ class LayoutError(ValueError):
     pass
 
 
-def slot_boxes(grid: dict) -> dict[int, dict]:
-    """Indice dello slot -> rettangolo in pixel sul display."""
+def slot_boxes(grid: dict, *, navbar: bool = True) -> dict[int, dict]:
+    """Indice dello slot -> rettangolo in pixel sul display.
+
+    Con una pagina sola la navbar non serve, e i suoi 28 px vanno alle tile:
+    la griglia 3x3 passa da 154x80 a 154x89. Per questo il calcolo dipende da
+    quante pagine sono visibili, e quindi non puo' stare in validate(): si fa
+    al momento di servire la richiesta, quando la visibilita' e' nota.
+    """
     cols, rows = int(grid["cols"]), int(grid["rows"])
-    area_h = DISPLAY_H - HEADER_H - NAVBAR_H
+    area_h = DISPLAY_H - HEADER_H - (NAVBAR_H if navbar else 0)
     w = (DISPLAY_W - (cols + 1) * GUTTER) // cols
     h = (area_h - (rows + 1) * GUTTER) // rows
     boxes = {}
@@ -210,7 +207,6 @@ def validate(raw: dict) -> dict:
         if when is not None and not isinstance(when, str):
             raise LayoutError(f"{where_page}: 'when' deve essere una stringa")
         page_grid = _check_grid(page.get("grid") or grid, f"{where_page}, griglia")
-        boxes = slot_boxes(page_grid)
 
         slots = []
         occupati: dict[int, str] = {}
@@ -231,18 +227,30 @@ def validate(raw: dict) -> dict:
                     f"{page_grid['cols']}x{page_grid['rows']}"
                 )
             index = slot_index(list(pos), page_grid)
-            if index in occupati:
+            slot_when = slot.get("when")
+            if slot_when is not None and not isinstance(slot_when, str):
                 raise LayoutError(
-                    f"{where_page}: slot {list(pos)} occupato da {occupati[index]!r}"
+                    f"{where_page}, slot {list(pos)}: 'when' deve essere una stringa"
                 )
+            # Piu' slot possono condividere una posizione, purche' al massimo
+            # uno sia incondizionato: e' cosi' che la riga in basso diventa i
+            # comandi multimediali quando un player e' attivo, e torna alle
+            # app quando non lo e'. Due slot incondizionati sulla stessa
+            # casella sarebbero invece un errore di battitura.
+            if slot_when is None:
+                if index in occupati:
+                    raise LayoutError(
+                        f"{where_page}: slot {list(pos)} occupato da "
+                        f"{occupati[index]!r} e nessuno dei due ha 'when'"
+                    )
+                occupati[index] = slot.get("label", "")
             label = slot.get("label", "")
-            occupati[index] = label
             where_slot = f"{where_page}, slot {list(pos)}"
             slots.append(
                 {
                     "pos": [col, row],
                     "index": index,
-                    "box": boxes[index],
+                    "when": slot_when,
                     "label": label,
                     "icon": slot.get("icon") or "text:?",
                     "color": slot.get("color"),

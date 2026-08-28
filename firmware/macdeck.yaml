@@ -218,9 +218,11 @@ script:
                     id(hit_8), id(hit_9), id(hit_10), id(hit_11)};
                   bool used[12] = {false};
                   std::string screen_url;
+                  bool nav = true;
                   json::parse_json(body, [&](JsonObject root) -> bool {
                     id(layout_version) = root["version"] | -1;
                     id(page_count) = root["pages"].size();
+                    nav = root["nav"] | true;
                     // Autoritativa: il server puo' aver riportato l'indice
                     // dentro l'intervallo se la pagina corrente e' sparita.
                     id(current_page) = root["page"] | 0;
@@ -241,6 +243,12 @@ script:
                       lv_obj_add_flag(hits[i], LV_OBJ_FLAG_HIDDEN);
                       id(state_keys)[i] = "";
                     }
+                  }
+                  // Con una pagina sola le frecce non servono, e i 28 px
+                  // della barra sono gia' stati dati alle tile dal Mac.
+                  for (lv_obj_t *b : {id(nav_prev), id(nav_next)}) {
+                    if (nav) lv_obj_clear_flag(b, LV_OBJ_FLAG_HIDDEN);
+                    else     lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
                   }
                   if (!screen_url.empty()) {
                     id(screen_img)->set_url(

@@ -84,6 +84,8 @@ def test_pagina_fuori_intervallo_viene_riportata_dentro(ctx):
 
 
 def test_tile_restituisce_un_png_della_dimensione_giusta(ctx):
+    # Il layout di prova ha due pagine, quindi la navbar c'e' e le tile sono
+    # alte 80. Con una pagina sola sarebbero 89.
     client, *_ = ctx
     r = client.get("/tile/0/0.png", headers=AUTH)
     assert r.status_code == 200
@@ -174,7 +176,7 @@ def test_api_config_da_loopback_legge_e_scrive(ctx):
     r = client.put("/api/config", json={"pages": [{"name": "Nuova", "slots": []}]},
                    headers=LOCAL)
     assert r.status_code == 200
-    assert store.version > prima
+    assert store.version != prima
 
 
 def test_api_config_rifiuta_un_layout_invalido(ctx):
@@ -256,7 +258,7 @@ def test_tile_preview_rende_una_tile_non_salvata(ctx, tmp_path):
     })
     assert r.status_code == 200
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (154, 80)
+        assert im.size == (154, 89)
     assert store.version == prima          # l'anteprima non salva nulla
 
 
@@ -267,7 +269,7 @@ def test_tile_preview_rispetta_la_griglia_richiesta(ctx):
         "slot": {"pos": [0, 0], "label": "Grande", "icon": "text:G"},
     })
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (234, 122)
+        assert im.size == (234, 136)
 
 
 def test_tile_preview_rifiuta_una_griglia_impossibile(ctx):
@@ -428,3 +430,79 @@ def test_la_versione_efficace_e_stabile_fra_processi(tmp_path, fake_ex):
         return TestClient(app).get("/layout", headers=AUTH).json()["version"]
 
     assert versione() == versione()
+
+
+# --------------------------------- slot a comparsa: la riga che si trasforma
+
+LAYOUT_RIGA_CONDIZIONALE = {
+    "grid": {"cols": 3, "rows": 3},
+    "pages": [{"name": "Dev", "slots": [
+        {"pos": [0, 0], "label": "App", "icon": "text:A",
+         "action": {"type": "app", "target": "Finder"}},
+        # stessa casella, due contenuti: quello condizionale vince quando
+        # la sua condizione e' vera, indipendentemente dall'ordine nel file
+        {"pos": [0, 2], "label": "Slack", "icon": "text:S",
+         "action": {"type": "app", "target": "Slack"}},
+        {"pos": [0, 2], "label": "Indietro", "icon": "text:<",
+         "when": "media.app", "action": {"type": "media", "op": "prev"}},
+    ]}]
+}
+
+
+def test_senza_player_la_casella_mostra_lapp(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_RIGA_CONDIZIONALE)
+    _con_player(fake_ex, False)
+    probe.refresh()
+    slots = {s["i"]: s for s in client.get("/layout", headers=AUTH).json()["slots"]}
+    assert 6 in slots
+    r = client.post("/press", json={"page": 0, "slot": 6}, headers=AUTH)
+    assert r.json()["ok"]
+    assert any("Slack" in " ".join(c) for c in fake_ex.calls)
+
+
+def test_con_player_la_stessa_casella_diventa_un_comando_media(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_RIGA_CONDIZIONALE)
+    _con_player(fake_ex, True)
+    probe.refresh()
+    fake_ex.calls.clear()
+    client.post("/press", json={"page": 0, "slot": 6}, headers=AUTH)
+    scripts = " ".join(fake_ex.scripts)
+    assert "previous track" in scripts
+    assert not any("Slack" in " ".join(c) for c in fake_ex.calls)
+
+
+def test_lo_scambio_della_casella_cambia_la_versione(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_RIGA_CONDIZIONALE)
+    _con_player(fake_ex, False)
+    probe.refresh()
+    a = client.get("/state", headers=AUTH).json()["layout_version"]
+    _con_player(fake_ex, True)
+    probe.refresh()
+    b = client.get("/state", headers=AUTH).json()["layout_version"]
+    assert a != b
+
+
+def test_una_pagina_sola_non_ha_navbar_e_le_tile_sono_piu_alte(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_RIGA_CONDIZIONALE)
+    _con_player(fake_ex, False)
+    probe.refresh()
+    body = client.get("/layout", headers=AUTH).json()
+    assert body["nav"] is False
+    assert body["slots"][0]["h"] == 89
+
+
+def test_con_due_pagine_la_navbar_torna_e_le_tile_si_abbassano(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save({"grid": {"cols": 3, "rows": 3}, "pages": [
+        {"name": "Uno", "slots": [{"pos": [0, 0], "label": "A", "icon": "text:A",
+                                   "action": {"type": "noop"}}]},
+        {"name": "Due", "slots": []},
+    ]})
+    probe.refresh()
+    body = client.get("/layout", headers=AUTH).json()
+    assert body["nav"] is True
+    assert body["slots"][0]["h"] == 80

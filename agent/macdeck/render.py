@@ -153,6 +153,7 @@ def render_screen(
     *,
     page_index: int = 0,
     page_count: int = 1,
+    navbar: bool = True,
     root: Path | None = None,
 ) -> Image.Image:
     """Compone l'INTERA schermata: sfondo, tile e navbar.
@@ -172,6 +173,11 @@ def render_screen(
     for slot in page["slots"]:
         box = slot["box"]
         im.paste(render_tile(slot, theme, root=root), (box["x"], box["y"]))
+
+    if not navbar:
+        # Con una pagina sola non c'e' niente fra cui navigare, e i 28 px
+        # della barra sono gia' stati dati alle tile da slot_boxes().
+        return im
 
     d = ImageDraw.Draw(im)
     nav_y = L.DISPLAY_H - L.NAVBAR_H

@@ -43,7 +43,9 @@ def test_validate_normalizza_i_default_mancanti():
     assert out["pages"][0]["grid"] == L.DEFAULT_GRID
 
 
-def test_validate_calcola_geometria_e_indice_per_ogni_slot():
+def test_validate_calcola_lindice_ma_non_la_geometria():
+    """Il box dipende da quante pagine sono visibili, che si sa solo a
+    runtime: si calcola al momento di servire, non in validazione."""
     out = L.validate({
         "pages": [{"name": "X", "slots": [
             {"pos": [1, 0], "label": "A", "icon": "text:A",
@@ -51,7 +53,45 @@ def test_validate_calcola_geometria_e_indice_per_ogni_slot():
     })
     slot = out["pages"][0]["slots"][0]
     assert slot["index"] == 1
-    assert slot["box"] == {"x": 162, "y": 40, "w": 154, "h": 80}
+    assert "box" not in slot
+
+
+def test_senza_navbar_le_tile_sono_piu_alte():
+    """Con una pagina sola i 28 px della barra vanno alle tile."""
+    con = L.slot_boxes(L.DEFAULT_GRID, navbar=True)[0]
+    senza = L.slot_boxes(L.DEFAULT_GRID, navbar=False)[0]
+    assert senza["w"] == con["w"]
+    assert senza["h"] == con["h"] + L.NAVBAR_H // 3
+    assert senza["h"] == 89
+
+
+def test_due_slot_sulla_stessa_casella_se_almeno_uno_ha_when():
+    out = L.validate({"pages": [{"name": "X", "slots": [
+        {"pos": [0, 0], "label": "Normale", "icon": "text:N",
+         "action": {"type": "noop"}},
+        {"pos": [0, 0], "label": "Condizionale", "icon": "text:C",
+         "when": "media.app", "action": {"type": "noop"}},
+    ]}]})
+    assert len(out["pages"][0]["slots"]) == 2
+
+
+def test_due_slot_incondizionati_sulla_stessa_casella_sono_un_errore():
+    with pytest.raises(L.LayoutError) as e:
+        L.validate({"pages": [{"name": "X", "slots": [
+            {"pos": [0, 0], "label": "A", "icon": "text:A",
+             "action": {"type": "noop"}},
+            {"pos": [0, 0], "label": "B", "icon": "text:B",
+             "action": {"type": "noop"}},
+        ]}]})
+    assert "occupato" in str(e.value)
+
+
+def test_when_sullo_slot_non_stringa_viene_rifiutato():
+    with pytest.raises(L.LayoutError) as e:
+        L.validate({"pages": [{"name": "X", "slots": [
+            {"pos": [0, 0], "label": "A", "icon": "text:A",
+             "when": 7, "action": {"type": "noop"}}]}]})
+    assert "when" in str(e.value)
 
 
 @pytest.mark.parametrize("raw,atteso", [
