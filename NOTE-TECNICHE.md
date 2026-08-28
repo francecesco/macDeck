@@ -596,11 +596,43 @@ stato di riposo, e il contatore è un pulsante che le scorre. Il pannello dice
 quale si sta modificando e sotto quale condizione compare: senza quella riga
 si finisce per correggere la tile sbagliata.
 
+### Un percorso senza prefisso non è un errore dell'utente
+
+`resolve` cominciava con `if ":" not in spec: return fallback(size)`. Quindi
+`app:/Applications/Slack.app` funzionava e `/System/Applications/Mail.app`
+no — **in silenzio**, con la tile che mostrava un punto di domanda e nessuna
+spiegazione da nessuna parte. Sono rimaste così tre tile configurate a mano,
+e il sintomo sembrava riguardare le app di sistema.
+
+Chi configura incolla un percorso, o scrive il nome dell'app. Pretendere il
+prefisso significa fallire proprio sul gesto più naturale. Ora `guess_scheme`
+guarda com'è fatto il valore — finisce in `.app`, è un file immagine, è il
+nome di un'app installata — e sceglie da sé. I prefissi espliciti continuano
+a vincere, e uno schema sconosciuto non viene scambiato per una cartella.
+
+Vale in generale: quando una sintassi ha una forma "giusta" e una forma
+ovvia, e sono diverse, è il codice a doversi adattare.
+
+### Le icone stanno fuori dal layout, quindi la versione non basta
+
+La versione è l'impronta del layout risolto — ma un'icona vive nel bundle di
+un'app, sul disco. Se cambia l'icona di un'app, o cambia il modo in cui la
+risolviamo, **il layout resta identico e il display non riscarica niente**:
+continua a mostrare l'immagine vecchia finché non cambia altro.
+
+È successo esattamente correggendo il difetto qui sopra: le icone si
+risolvevano, i test passavano, e sul deck non cambiava nulla.
+
+`POST /api/refresh` incrementa un contatore che entra nella firma, svuota la
+cache delle tile e azzera quella dei nomi visualizzati. Nella GUI è il
+pulsante "Ridisegna il display". Serve anche dopo aver aggiornato un'app che
+ha cambiato icona.
+
 ## Comandi utili
 
 ```bash
 cd agent
-.venv/bin/python -m pytest                        # 255 test, nessun hardware
+.venv/bin/python -m pytest                        # 265 test, nessun hardware
 .venv/bin/python -m macdeck.cli doctor            # permessi e configurazione
 .venv/bin/python -m macdeck.cli token             # token da mettere nei secrets
 .venv/bin/python -m macdeck.cli pair              # insegna al deck la rete di adesso

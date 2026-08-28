@@ -84,6 +84,7 @@ textarea{min-height:76px;font-family:ui-monospace,Menlo,monospace;font-size:12.5
   <span class="pill" id="dirty" style="display:none">modifiche non salvate</span>
   <span class="sp"></span>
   <button class="ghost" id="reload">Ricarica</button>
+  <button class="ghost" id="redraw" title="Costringe il display a ridisegnare, anche se il layout non e' cambiato: serve quando cambia l'icona di un'app">Ridisegna il display</button>
   <button class="primary" id="save" disabled>Salva</button>
 </header>
 
@@ -494,7 +495,18 @@ function renderFields(host, action){
           inp.value=scelta.path;
           action[f.k]=scelta.path;
           box.style.display='none';
+          // Si propone anche l'icona dell'app, ma solo se non ce n'e' una
+          // scelta apposta: un'icona mdi messa a mano non va sovrascritta.
+          const sl = sel.index!==null ? slotAt(curPage(), sel.index) : null;
+          if(sl){
+            const ora = sl.icon||'';
+            if(!ora || ora==='text:?' || ora.startsWith('app:')){
+              sl.icon='app:'+scelta.path;
+              if(!sl.label || sl.label==='Nuovo') sl.label=scelta.name;
+            }
+          }
           setDirty(true);
+          render();
         });
       };
       return;
@@ -637,6 +649,21 @@ document.getElementById('pgDel').onclick=()=>{
 };
 
 // ---------------------------------------------------------------- salva
+document.getElementById('redraw').onclick=async()=>{
+  // Le icone stanno fuori dal layout: se ne cambia una, il layout resta
+  // identico e il display non ha motivo di riscaricare. Questo glielo dice.
+  const b=document.getElementById('redraw');
+  b.disabled=true; b.textContent='…';
+  try{
+    const r=await fetch('/api/refresh',{method:'POST'});
+    banner(r.ok?'bOk':'bErr', r.ok
+      ? 'Il display ridisegna entro un paio di secondi.'
+      : 'Non sono riuscito a forzare il ridisegno.');
+    setTimeout(()=>banner('bOk',''),4000);
+  }catch(e){ banner('bErr','Agent non raggiungibile.'); }
+  b.disabled=false; b.textContent='Ridisegna il display';
+};
+
 document.getElementById('save').onclick=async()=>{
   banner('bErr',''); banner('bOk','');
   const r=await fetch('/api/config',{method:'PUT',

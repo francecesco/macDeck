@@ -98,6 +98,12 @@ def create_app(
             risolte.append({**pagina, "slots": [scelti[i] for i in sorted(scelti)]})
         return risolte, navbar
 
+    # Le icone non stanno nel layout: vivono sul disco, dentro i bundle delle
+    # app. Se cambia un'icona — o cambia il modo in cui la risolviamo — il
+    # layout resta identico e il display non riscarica nulla. Questo contatore
+    # entra nella firma apposta per poterglielo dire.
+    nudge = {"n": 0}
+
     def _signature(risolte: list[dict], navbar: bool) -> int:
         """Versione = impronta di CIO' CHE IL DISPLAY RICEVEREBBE.
 
@@ -109,7 +115,8 @@ def create_app(
         Niente hash() di Python: e' randomizzato per processo e la versione
         cambierebbe a ogni riavvio dell'agent a parita' di contenuto.
         """
-        payload = json.dumps([risolte, navbar], sort_keys=True, ensure_ascii=False)
+        payload = json.dumps([risolte, navbar, nudge["n"]],
+                             sort_keys=True, ensure_ascii=False)
         return int(hashlib.sha256(payload.encode()).hexdigest()[:8], 16)
 
     def _page_index(requested: int, risolte: list[dict]) -> int:
@@ -270,6 +277,14 @@ def create_app(
     def test_action(body: dict) -> dict:
         result = pool.submit(actions.run, body, executor).result()
         return {"ok": result.ok, "error": result.error, "out": result.out}
+
+    @app.post("/api/refresh", dependencies=[Depends(require_local)])
+    def force_refresh() -> dict:
+        """Costringe il display a ridisegnare, a layout invariato."""
+        nudge["n"] += 1
+        cache.clear()
+        icons.reset_display_names()
+        return {"ok": True}
 
     @app.get("/api/icons", dependencies=[Depends(require_local)])
     def list_icons(q: str = "") -> dict:

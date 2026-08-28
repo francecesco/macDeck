@@ -161,3 +161,58 @@ def test_il_nome_italiano_trova_l_app_vera():
     if b is None:
         pytest.skip("Mac non in italiano, o Anteprima non installata")
     assert b.stem == "Preview"
+
+
+# ------------------------------------------- specifiche senza schema esplicito
+
+
+def _vera(im, size=64):
+    """Un'icona vera, cioe' diversa dal punto di domanda di ripiego.
+
+    Contare i colori non basta: l'antialiasing del ripiego ne produce a
+    sufficienza da farlo passare per un'icona. Si confronta con il ripiego.
+    """
+    if im is None:
+        return False
+    return im.tobytes() != icons.fallback(size).tobytes()
+
+
+def test_un_percorso_a_un_app_funziona_senza_prefisso():
+    # Chi configura incolla il percorso e basta. Pretendere "app:" davanti
+    # significa fallire in silenzio proprio sul gesto piu' naturale.
+    p = icons.locate_bundle("Terminal")
+    if p is None:
+        pytest.skip("Terminal.app non trovata")
+    assert _vera(icons.resolve(str(p), 64))
+
+
+def test_un_nome_di_app_funziona_senza_prefisso():
+    if icons.locate_bundle("Terminal") is None:
+        pytest.skip("Terminal.app non trovata")
+    assert _vera(icons.resolve("Terminal", 64))
+
+
+def test_un_file_immagine_funziona_senza_prefisso(tmp_path):
+    f = tmp_path / "logo.png"
+    Image.new("RGB", (40, 40), "#c04030").save(f)
+    assert _vera(icons.resolve(str(f), 64))
+
+
+def test_il_prefisso_esplicito_continua_a_vincere():
+    im = icons.resolve("text:AB", 64)
+    assert _vera(im)
+
+
+def test_uno_schema_ignoto_non_diventa_un_percorso():
+    # "pippo:qualcosa" non e' un percorso ne' un'app: deve restare il ripiego,
+    # non provare a interpretare "pippo" come cartella.
+    im = icons.resolve("pippo:qualcosa", 64)
+    assert im is not None
+
+
+def test_testo_qualunque_resta_leggibile():
+    assert _vera(icons.resolve("XY", 64))
+
+
+def test_un_percorso_inesistente_non_esplode():
+    assert icons.resolve("/non/esiste/da/nessuna/parte.app", 64) is not None

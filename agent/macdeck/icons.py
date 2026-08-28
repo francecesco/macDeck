@@ -316,10 +316,41 @@ def _from_text(text: str, size: int) -> Image.Image:
     return im
 
 
+SCHEMES = ("app", "file", "mdi", "emoji", "text")
+
+IMG_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".icns",
+                ".tiff", ".tif")
+
+
+def guess_scheme(spec: str) -> tuple[str, str]:
+    """Indovina lo schema quando non c'e'.
+
+    Chi configura incolla un percorso, o scrive il nome dell'app, e si
+    aspetta che funzioni: pretendere il prefisso "app:" significa fallire in
+    silenzio proprio sul gesto piu' naturale — ed e' successo davvero, con
+    tre tile rimaste senza icona e nessun messaggio a dire perche'.
+    """
+    testo = spec.strip()
+    p = Path(testo).expanduser()
+    if testo.endswith(".app") or p.suffix == ".app":
+        return "app", testo
+    if p.suffix.lower() in IMG_SUFFIXES:
+        return "file", testo
+    if p.is_file():
+        return "file", testo
+    if "/" not in testo and _locate_bundle(testo) is not None:
+        return "app", testo
+    return "text", testo
+
+
 def resolve(spec: str, size: int, *, root: Path | None = None) -> Image.Image:
-    if not spec or ":" not in spec:
+    if not spec:
         return fallback(size)
     scheme, _, target = spec.partition(":")
+    if scheme not in SCHEMES:
+        # Nessuno schema, o uno che non conosciamo: si guarda com'e' fatto
+        # il valore invece di arrendersi.
+        scheme, target = guess_scheme(spec)
     try:
         if scheme == "app":
             return _from_app(target, size)

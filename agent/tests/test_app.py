@@ -530,3 +530,27 @@ def test_i_glifi_mdi_restano_limitati(ctx):
     if not d["mdi_total"]:
         pytest.skip("font MDI non installato in questa radice di prova")
     assert len(d["mdi"]) <= 120
+
+
+def test_forzare_il_ridisegno_cambia_la_versione(ctx):
+    # Le icone vivono fuori dal layout: se cambia l'icona di un'app, o
+    # migliora il modo in cui la risolviamo, il layout resta identico e il
+    # display non ha motivo di riscaricare. Serve poterglielo dire.
+    client = ctx[0]
+    prima = client.get("/layout", headers=AUTH).json()["version"]
+    r = client.post("/api/refresh", headers=LOCAL)
+    assert r.status_code == 200
+    dopo = client.get("/layout", headers=AUTH).json()["version"]
+    assert dopo != prima
+
+
+def test_il_ridisegno_svuota_la_cache_delle_tile(ctx):
+    client, store, ex, probe = ctx
+    client.get("/tile/0/0.png", headers=AUTH)
+    client.post("/api/refresh", headers=LOCAL)
+    # la cache viene svuotata: la tile successiva si rigenera
+    assert client.get("/tile/0/0.png", headers=AUTH).status_code == 200
+
+
+def test_il_ridisegno_e_solo_locale(ctx):
+    assert ctx[0].post("/api/refresh").status_code == 403
