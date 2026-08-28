@@ -120,6 +120,62 @@ def _bundle_identifier(bundle: Path) -> str | None:
         return None
 
 
+
+# ------------------------------------------------- i nomi che mostra il Finder
+
+MDLS = "/usr/bin/mdls"
+_display_cache: dict[str, str] | None = None
+
+
+def reset_display_names() -> None:
+    """Svuota la cache. Serve ai test e dopo l'installazione di un'app."""
+    global _display_cache
+    _display_cache = None
+
+
+def display_names(bundles=None, ex=None) -> dict[str, str]:
+    """Mappa percorso -> nome come lo mostra il Finder.
+
+    Serve perche' sul disco un'app si chiama in inglese ma il Finder la
+    mostra tradotta: su un Mac italiano succede a piu' di un terzo delle app
+    installate (Preview/Anteprima, Calculator/Calcolatrice...). Chi configura
+    legge il nome tradotto, lo scrive, e non viene trovato niente.
+
+    Il nome tradotto non sta nel bundle — per le app Apple lo sa solo
+    LaunchServices — quindi tocca chiedere a `mdls`. Una sola invocazione per
+    tutte le app: farne una per bundle significherebbe centinaia di processi.
+    """
+    global _display_cache
+    if bundles is None:
+        if _display_cache is not None:
+            return _display_cache
+        bundles = [b for d in app_dirs() for b in sorted(d.glob("*.app"))]
+        salva = True
+    else:
+        salva = False
+    bundles = list(bundles)
+    if not bundles:
+        return {}
+
+    from .executor import Executor
+    ex = ex or Executor()
+    r = ex.run([MDLS, "-name", "kMDItemDisplayName", "-raw",
+                *[str(b) for b in bundles]], timeout=20.0)
+    mappa: dict[str, str] = {}
+    if r.ok and r.out:
+        for bundle, nome in zip(bundles, r.out.split("\0")):
+            nome = nome.strip().removesuffix(".app")
+            if nome and nome != "(null)":
+                mappa[str(bundle)] = nome
+    if salva:
+        _display_cache = mappa
+    return mappa
+
+
+def locate_bundle(target: str):
+    """Come _locate_bundle, ma pubblica: la usano la GUI e i test."""
+    return _locate_bundle(target)
+
 def _locate_bundle(target: str) -> Path | None:
     """Risolve un nome ("Slack") o un bundle id in un percorso .app.
 
@@ -141,11 +197,20 @@ def _locate_bundle(target: str) -> Path | None:
             for bundle in folder.glob("*.app"):
                 if (_bundle_identifier(bundle) or "").lower() == target.lower():
                     return bundle
-    # ultimo tentativo: corrispondenza parziale sul nome
+    # il nome tradotto che mostra il Finder: "Anteprima" -> Preview.app
+    for percorso, mostrato in display_names().items():
+        if mostrato.lower() == wanted:
+            return Path(percorso)
+
+    # ultimo tentativo: corrispondenza parziale, prima sul nome su disco e
+    # poi su quello tradotto
     for folder in app_dirs():
         for bundle in sorted(folder.glob("*.app")):
             if wanted in bundle.stem.lower():
                 return bundle
+    for percorso, mostrato in display_names().items():
+        if wanted in mostrato.lower():
+            return Path(percorso)
     return None
 
 

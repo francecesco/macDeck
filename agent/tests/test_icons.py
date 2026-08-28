@@ -1,3 +1,6 @@
+from pathlib import Path
+
+import pytest
 from PIL import Image
 
 from macdeck import icons
@@ -96,3 +99,65 @@ def test_parse_mdi_scss_su_input_vuoto():
 
 def test_mdi_names_vuoto_senza_font(tmp_path):
     assert icons.mdi_names(root=tmp_path) == []
+
+
+# ------------------------------------------------- i nomi che mostra il Finder
+
+
+def test_mappa_dei_nomi_visualizzati(fake_ex):
+    from macdeck.executor import Result as R
+    from macdeck import icons as I
+    I.reset_display_names()
+    # mdls con piu' file separa i valori con NUL
+    fake_ex.replies = {"mdls": R(True, out="Anteprima\0Calcolatrice\0")}
+    m = I.display_names([Path("/A/Preview.app"), Path("/A/Calculator.app")], fake_ex)
+    assert m == {"/A/Preview.app": "Anteprima", "/A/Calculator.app": "Calcolatrice"}
+
+
+def test_una_sola_chiamata_per_tutte_le_app(fake_ex):
+    from macdeck.executor import Result as R
+    from macdeck import icons as I
+    I.reset_display_names()
+    fake_ex.replies = {"mdls": R(True, out="A\0B\0C\0")}
+    I.display_names([Path(f"/A/{n}.app") for n in "xyz"], fake_ex)
+    # 224 app non devono diventare 224 processi
+    assert len([c for c in fake_ex.calls if "mdls" in c[0]]) == 1
+
+
+def test_mdls_che_fallisce_non_rompe_niente(fake_ex):
+    from macdeck.executor import Result as R
+    from macdeck import icons as I
+    I.reset_display_names()
+    fake_ex.replies = {"mdls": R(False, error="boom")}
+    assert I.display_names([Path("/A/Preview.app")], fake_ex) == {}
+
+
+def test_valori_mancanti_vengono_ignorati(fake_ex):
+    from macdeck.executor import Result as R
+    from macdeck import icons as I
+    I.reset_display_names()
+    # mdls restituisce "(null)" per i file che non conosce
+    fake_ex.replies = {"mdls": R(True, out="Anteprima\0(null)\0")}
+    m = I.display_names([Path("/A/Preview.app"), Path("/A/Ignota.app")], fake_ex)
+    assert m == {"/A/Preview.app": "Anteprima"}
+
+
+def test_l_estensione_app_non_finisce_nel_nome(fake_ex):
+    from macdeck.executor import Result as R
+    from macdeck import icons as I
+    I.reset_display_names()
+    fake_ex.replies = {"mdls": R(True, out="Anteprima.app\0")}
+    assert I.display_names([Path("/A/Preview.app")], fake_ex) == {
+        "/A/Preview.app": "Anteprima"}
+
+
+def test_il_nome_italiano_trova_l_app_vera():
+    # Test di sistema: su un Mac in italiano "Anteprima" deve arrivare a
+    # Preview.app. Senza la mappa dei nomi visualizzati fallisce, ed e'
+    # esattamente il caso che rendeva la configurazione frustrante.
+    from macdeck import icons as I
+    I.reset_display_names()
+    b = I.locate_bundle("Anteprima")
+    if b is None:
+        pytest.skip("Mac non in italiano, o Anteprima non installata")
+    assert b.stem == "Preview"

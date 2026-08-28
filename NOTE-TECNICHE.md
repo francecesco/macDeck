@@ -540,11 +540,47 @@ attaccati. Farlo funzionare sulle reti isolate richiederebbe un secondo
 trasporto completo sul cavo, immagine compresa: è un progetto a sé, non un
 ripiego.
 
+### Il Finder mostra un nome, il disco ne tiene un altro
+
+Su un Mac in italiano **81 app su 224** hanno un nome visualizzato diverso da
+quello del bundle: Anteprima/`Preview.app`, Calcolatrice/`Calculator.app`,
+Terminale/`Terminal.app`. Chi configura legge il nome tradotto, lo scrive, e
+non viene trovato niente — il difetto sembrava riguardare le app di sistema,
+e invece riguardava la lingua.
+
+Il nome tradotto **non sta nel bundle**: per le app Apple `InfoPlist.strings`
+nella `it.lproj` non esiste proprio, lo sa solo LaunchServices. Va chiesto a
+`mdls`, ma in **una sola invocazione per tutte le app** — una per bundle
+significherebbe centinaia di processi:
+
+```
+mdls -name kMDItemDisplayName -raw app1.app app2.app ...   # 224 app in 0,13 s
+```
+
+Con `-raw` e più file i valori escono separati da NUL, e le app sconosciute
+danno `(null)`. Il risultato sta in cache di modulo (`reset_display_names()`
+per svuotarla). La ricerca per nome prova prima il disco, poi il tradotto;
+`/api/icons` cerca su entrambi e **mostra** quello tradotto.
+
+### In configurazione servono tutte le tile, non quella che si vedrebbe adesso
+
+Con gli slot condizionali più tile condividono una casella. La GUI mostrava
+`tutti.find(s=>s.when) || tutti[0]`, cioè preferiva la condizionale: la terza
+riga appariva come ⏮ ⏯ ⏭ e Slack/Spotify/Screenshot **non erano
+raggiungibili**, nascoste dietro un contatore che non si poteva cliccare.
+
+L'anteprima del display e l'editor hanno bisogni opposti: il display mostra
+una cosa sola, l'editor deve arrivare a tutte. Ora `slotsAt` ordina in modo
+stabile — prima le incondizionate, poi le condizionali — la variante 0 è lo
+stato di riposo, e il contatore è un pulsante che le scorre. Il pannello dice
+quale si sta modificando e sotto quale condizione compare: senza quella riga
+si finisce per correggere la tile sbagliata.
+
 ## Comandi utili
 
 ```bash
 cd agent
-.venv/bin/python -m pytest                        # 248 test, nessun hardware
+.venv/bin/python -m pytest                        # 254 test, nessun hardware
 .venv/bin/python -m macdeck.cli doctor            # permessi e configurazione
 .venv/bin/python -m macdeck.cli token             # token da mettere nei secrets
 .venv/bin/python -m macdeck.cli pair              # insegna al deck la rete di adesso

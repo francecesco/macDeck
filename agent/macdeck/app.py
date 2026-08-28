@@ -276,15 +276,23 @@ def create_app(
         needle = q.lower()
         apps = []
         seen: set[str] = set()
+        # Il nome che il Finder mostra e quello del bundle sul disco spesso
+        # non coincidono ("Anteprima" contro "Preview"): si cerca su
+        # entrambi, e si mostra quello che l'utente riconosce.
+        mostrati = icons.display_names()
         for folder in icons.app_dirs():
             for bundle in sorted(folder.glob("*.app")):
-                name = bundle.stem
-                if name in seen:
+                disco = bundle.stem
+                if disco in seen:
                     continue
-                if needle and needle not in name.lower():
+                nome = mostrati.get(str(bundle), disco)
+                if needle and needle not in nome.lower() \
+                        and needle not in disco.lower():
                     continue
-                seen.add(name)
-                apps.append({"name": name, "icon": f"app:{bundle}"})
+                seen.add(disco)
+                apps.append({"name": nome, "path": str(bundle),
+                             "disk": disco, "icon": f"app:{bundle}"})
+        apps.sort(key=lambda a: a["name"].lower())
         mdi = [n for n in icons.mdi_names(root) if not needle or needle in n]
         return {
             "apps": apps[:120],

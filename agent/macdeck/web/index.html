@@ -150,7 +150,7 @@ let cfg=null, model=null, token=null, version=0;
 let sel={page:0, index:null}, dirty=false, dragFrom=null;
 
 const ACTION_FIELDS = {
-  app:        [{k:'target', l:'App — nome, percorso o bundle id'}],
+  app:        [{k:'target', l:'App', pickApp:true}],
   keys:       [{k:'keys', l:'Combinazione (es. cmd+shift+4)'},
                {k:'to', l:'Invia a questa app (opzionale)'}],
   text:       [{k:'text', l:'Testo da digitare'}],
@@ -170,12 +170,31 @@ const ACTION_FIELDS = {
 
 function gridOf(p){ return p.grid || model.grid; }
 function curPage(){ return model.pages[sel.page]; }
-function slotsAt(p,i){ const g=gridOf(p); return p.slots.filter(s=>idxOf(s.pos,g)===i); }
-function slotAt(p,i){
-  // A parita' di casella la GUI mostra il condizionale se c'e', perche' e'
-  // quello che il display mostrera' quando la condizione scatta.
-  const tutti=slotsAt(p,i);
-  return tutti.find(s=>s.when) || tutti[0];
+function slotsAt(p,i){
+  // Ordine stabile: prima le tile senza condizione, poi le condizionali.
+  // Cosi' la variante 0 e' sempre lo stato di riposo, quello che si vede
+  // per la gran parte del tempo.
+  const g=gridOf(p);
+  const tutte=p.slots.filter(s=>idxOf(s.pos,g)===i);
+  return [...tutte.filter(s=>!s.when), ...tutte.filter(s=>s.when)];
+}
+// Quale variante si sta guardando, per casella. Piu' tile possono condividere
+// la stessa posizione (la riga dei media compare solo con un player attivo):
+// in configurazione bisogna poterle vedere e modificare TUTTE, non solo
+// quella che il display mostrerebbe adesso.
+const variante={};
+function chiaveVar(i){ return sel.page+':'+i; }
+function varianteDi(p,i){
+  const n=slotsAt(p,i).length;
+  if(n<=1) return 0;
+  return (variante[chiaveVar(i)]||0) % n;
+}
+function slotAt(p,i){ return slotsAt(p,i)[varianteDi(p,i)]; }
+function cambiaVariante(i){
+  const n=slotsAt(curPage(),i).length;
+  if(n<=1) return;
+  variante[chiaveVar(i)]=(varianteDi(curPage(),i)+1)%n;
+  sel.index=i; render();
 }
 
 function toRaw(res){
@@ -274,11 +293,12 @@ async function render(){
       const quanti=slotsAt(p,i).length;
       if(quanti>1){
         const b=document.createElement('div');
-        b.textContent=quanti;
-        b.title=quanti+' tile condividono questa casella';
-        b.style.cssText='position:absolute;top:2px;right:3px;z-index:2;'+
+        b.textContent=(varianteDi(p,i)+1)+'/'+quanti;
+        b.title=quanti+' tile condividono questa casella — clicca per scorrerle';
+        b.style.cssText='position:absolute;top:2px;right:3px;z-index:3;cursor:pointer;'+
           'background:var(--accent);color:#04121f;border-radius:99px;'+
-          'font-size:9px;padding:0 4px;font-weight:700';
+          'font-size:9px;padding:0 5px;font-weight:700';
+        b.onclick=ev=>{ ev.stopPropagation(); cambiaVariante(i); };
         el.appendChild(b);
       }
       const img=document.createElement('img');
@@ -335,7 +355,19 @@ function renderSlotPanel(){
     };
     return;
   }
-  body.innerHTML=`
+  // Se la casella ospita piu' tile, dire subito quale si sta modificando:
+  // senza questo si finisce per correggere la tile sbagliata.
+  const varianti=slotsAt(p,sel.index);
+  const barra = varianti.length<2 ? '' : `
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;
+                padding:7px 9px;border-radius:8px;background:#1b2430">
+      <span style="font-size:11px">Questa casella ha <b>${varianti.length}</b> tile.
+        Stai modificando la <b>${varianteDi(p,sel.index)+1}</b>:
+        ${s.when ? 'visibile quando <code>'+s.when+'</code>' : 'sempre visibile'}</span>
+      <button class="ghost" id="fVar" style="margin-left:auto;flex:0 0 auto">Cambia</button>
+    </div>`;
+
+  body.innerHTML=barra+`
     <div class="row">
       <div><label>Etichetta</label><input id="fLabel"></div>
       <div><label>Colore tile</label>
@@ -374,6 +406,7 @@ function renderSlotPanel(){
   q('fState').value=s.state||'';
   q('fWhen').value=s.when||'';
   q('fColor').value=s.color||model.theme.tile;
+  if(varianti.length>1) q('fVar').onclick=()=>cambiaVariante(sel.index);
   q('fLabel').oninput=e=>{s.label=e.target.value;setDirty(true);refreshTile();};
   q('fIcon').oninput=e=>{s.icon=e.target.value;setDirty(true);refreshTile();};
   q('fState').oninput=e=>{s.state=e.target.value||undefined;setDirty(true);};
@@ -440,8 +473,85 @@ function renderFields(host, action){
       setDirty(true);
     };
     if(inp.tagName==='SELECT') inp.onchange=inp.oninput;
+
+    if(f.pickApp){
+      // Scegliere da un elenco invece di scrivere un percorso: il Finder
+      // mostra i nomi tradotti ("Anteprima"), il disco li tiene in inglese
+      // ("Preview.app"), e copiare il percorso a mano e' un supplizio.
+      const riga=document.createElement('div'); riga.className='row';
+      const btn=document.createElement('button');
+      btn.className='ghost'; btn.textContent='Scegli app…';
+      btn.style.cssText='flex:0 0 auto';
+      riga.appendChild(inp); riga.appendChild(btn);
+      host.appendChild(riga);
+      const box=document.createElement('div');
+      box.className='picker'; box.style.display='none';
+      host.appendChild(box);
+      btn.onclick=()=>{
+        if(box.style.display!=='none'){ box.style.display='none'; return; }
+        box.style.display='block';
+        mostraElencoApp(box, scelta=>{
+          inp.value=scelta.path;
+          action[f.k]=scelta.path;
+          box.style.display='none';
+          setDirty(true);
+        });
+      };
+      return;
+    }
     host.appendChild(inp);
   });
+}
+
+// Elenco delle app installate, con ricerca e icona. Mostra il nome che si
+// legge nel Finder e scrive nel layout il percorso completo: nessun
+// copia-incolla, e nessun nome tradotto che poi non si trova.
+async function mostraElencoApp(box, onScelta){
+  box.innerHTML='<div class="hint">carico…</div>';
+  const cerca=document.createElement('input');
+  cerca.placeholder='cerca fra le app installate…';
+  cerca.style.cssText='width:100%;margin-bottom:6px';
+  const lista=document.createElement('div');
+  lista.style.cssText='max-height:230px;overflow:auto';
+  box.innerHTML=''; box.appendChild(cerca); box.appendChild(lista);
+  cerca.focus();
+
+  let tutte=[];
+  try{
+    const r=await fetch('/api/icons');
+    tutte=(await r.json()).apps||[];
+  }catch(e){
+    lista.innerHTML='<div class="hint">elenco non disponibile</div>'; return;
+  }
+
+  function disegna(){
+    const q=cerca.value.toLowerCase();
+    const viste=tutte.filter(a=>!q||a.name.toLowerCase().includes(q)
+                                 ||(a.disk||'').toLowerCase().includes(q));
+    lista.innerHTML='';
+    if(!viste.length){ lista.innerHTML='<div class="hint">nessuna app</div>'; return; }
+    viste.slice(0,200).forEach(a=>{
+      const r=document.createElement('div');
+      r.style.cssText='display:flex;gap:8px;align-items:center;padding:4px 6px;'+
+        'border-radius:6px;cursor:pointer';
+      r.onmouseenter=()=>r.style.background='#1b2430';
+      r.onmouseleave=()=>r.style.background='';
+      const im=document.createElement('img');
+      im.width=22; im.height=22; im.loading='lazy';
+      im.src='/api/icon-preview?spec='+encodeURIComponent(a.icon)+'&size=44';
+      const t=document.createElement('div');
+      // Il nome su disco si mostra solo quando differisce: e' quello che
+      // finisce nel percorso, e vederlo evita sorprese.
+      t.innerHTML='<div style="font-size:12px">'+a.name+'</div>'+
+        (a.disk && a.disk!==a.name
+          ? '<div class="muted" style="font-size:10px">'+a.disk+'.app</div>' : '');
+      r.appendChild(im); r.appendChild(t);
+      r.onclick=()=>onScelta(a);
+      lista.appendChild(r);
+    });
+  }
+  cerca.oninput=disegna;
+  disegna();
 }
 
 function renderSequence(host, action){
