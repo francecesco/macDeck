@@ -53,3 +53,17 @@ def load_or_create_token(root: Path | None = None) -> str:
     f.write_text(token + "\n")
     f.chmod(0o600)
     return token
+
+
+def firmware_secrets(root: Path | None = None) -> Path:
+    """Dove sta la chiave di cifratura dell'API del deck.
+
+    E' lo stesso file che legge ESPHome quando compila: tenerne una copia
+    nella configurazione dell'agent significherebbe due verita' che prima o
+    poi divergono. Un file omonimo dentro la cartella di configurazione ha
+    comunque la precedenza, per chi tiene il firmware altrove.
+    """
+    override = config_dir(root) / "secrets.yaml"
+    if override.exists():
+        return override
+    return Path(__file__).resolve().parent.parent.parent / "firmware" / "secrets.yaml"

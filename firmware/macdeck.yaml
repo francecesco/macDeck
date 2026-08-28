@@ -59,8 +59,19 @@ logger:
   hardware_uart: USB_SERIAL_JTAG
 
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  # In ordine di preferenza. Il deck prova la prima disponibile, quindi
+  # portarlo fuori casa e' solo questione di accendere l'hotspot: si aggancia
+  # da solo, e l'agent sul Mac lo ritrova via Bonjour senza toccare niente.
+  # Le voci con SSID vuoto sono ignorate.
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+    - ssid: !secret wifi_ssid_2
+      password: !secret wifi_password_2
+    - ssid: !secret wifi_ssid_3
+      password: !secret wifi_password_3
+  # Ultima spiaggia: nessuna rete nota. Il deck alza il proprio access point
+  # e il portale, ci si collega dal telefono e gli si passa una rete nuova.
   ap:
     ssid: "MacDeck Fallback"
   on_connect:
@@ -138,7 +149,13 @@ touchscreen:
 
 http_request:
   id: http
-  timeout: 8s
+  # NON alzare questo valore. Il componente e' sincrono: ogni richiesta che
+  # non riceve risposta blocca il loop principale per l'intero timeout, e a
+  # 8 s si superava il watchdog di ESP-IDF (5 s). Il deck si riavviava, e
+  # dopo qualche riavvio ESP-IDF tornava alla partizione precedente
+  # buttando via l'aggiornamento appena caricato, in silenzio.
+  # Succede ogni volta che il Mac non risponde: spento, o su un'altra rete.
+  timeout: 3s
   verify_ssl: false
 
 globals:
@@ -177,6 +194,39 @@ globals:
   - id: state_keys
     type: std::array<std::string, 12>
     restore_value: false
+  - id: hit_refs
+    type: std::array<lv_obj_t *, 12>
+    restore_value: false
+  - id: giri_a_vuoto
+    type: int
+    restore_value: false
+    initial_value: "0"
+  - id: slot_in_volo
+    type: int
+    restore_value: false
+    initial_value: "-1"
+
+# L'indirizzo del Mac non e' piu' scritto nel firmware. Il Mac cerca il deck
+# via Bonjour (lo annuncia ESPHome da solo) e scrive qui dove trovarlo; il
+# valore resta in memoria permanente, quindi al riavvio si riparte da li'
+# anche se il Mac e' spento. Su una rete mai vista non c'e' niente da
+# configurare: basta che i due siano sulla stessa rete.
+# Modificabile anche a mano, da Home Assistant o da qualsiasi client API.
+text:
+  - platform: template
+    id: agent_host_txt
+    name: "Indirizzo agent"
+    optimistic: true
+    restore_value: true
+    initial_value: "${agent_host}"
+    mode: text
+    min_length: 0
+    max_length: 63
+    on_value:
+      then:
+        # Indirizzo nuovo: si riparte subito, senza aspettare il polling.
+        - lambda: 'id(layout_version) = -1;'
+        - script.execute: fetch_layout
 
 online_image:
   - id: screen_img
@@ -211,7 +261,7 @@ script:
     then:
       - http_request.get:
           url: !lambda |-
-            return "http://${agent_host}:${agent_port}/layout?page=" +
+            return std::string("http://") + id(agent_host_txt).state + ":${agent_port}" + "/layout?page=" +
                    to_string(id(current_page));
           request_headers:
             X-Deck-Token: !secret deck_token
@@ -265,8 +315,7 @@ script:
                     else     lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
                   }
                   if (!screen_url.empty()) {
-                    id(screen_img)->set_url(
-                      "http://${agent_host}:${agent_port}" + screen_url);
+                    id(screen_img)->set_url(std::string("http://") + id(agent_host_txt).state + ":${agent_port}" + screen_url);
                     id(screen_img)->update();
                   }
 
@@ -274,7 +323,7 @@ script:
     mode: restart
     then:
       - http_request.get:
-          url: "http://${agent_host}:${agent_port}/state"
+          url: !lambda 'return std::string("http://") + id(agent_host_txt).state + ":${agent_port}" + "/state";'
           request_headers:
             X-Deck-Token: !secret deck_token
           capture_response: true
@@ -372,6 +421,38 @@ script:
           id(current_page) = ((id(current_page) + delta) % n + n) % n;
       - script.execute: fetch_layout
 
+  - id: flash_esito
+    # La seconda meta' del feedback. Il velo alla pressione lo disegna LVGL
+    # da solo, al dito, senza rete: dice "ho sentito". Questo dice "il Mac ha
+    # eseguito" (verde) oppure "non ha risposto" (rosso), e per forza di cose
+    # arriva dopo, quando la POST ha una risposta.
+    # mode: restart e lo spegnimento di TUTTE le caselle a ogni giro: due
+    # tocchi ravvicinati interrompono il primo flash a meta', e senza questo
+    # una casella resterebbe accesa per sempre.
+    mode: restart
+    parameters:
+      slot: int
+      ok: bool
+    then:
+      - lambda: |-
+          auto &H = id(hit_refs);
+          if (H[0] == nullptr)
+            H = {id(hit_0), id(hit_1), id(hit_2),  id(hit_3),
+                 id(hit_4), id(hit_5), id(hit_6),  id(hit_7),
+                 id(hit_8), id(hit_9), id(hit_10), id(hit_11)};
+          for (int i = 0; i < 12; i++)
+            lv_obj_set_style_bg_opa(H[i], LV_OPA_TRANSP, LV_PART_MAIN);
+          if (slot < 0 || slot > 11) return;
+          lv_obj_set_style_bg_color(H[slot],
+            lv_color_hex(ok ? 0x2FBF5F : 0xE5484D), LV_PART_MAIN);
+          lv_obj_set_style_bg_opa(H[slot], 170, LV_PART_MAIN);
+      - delay: 300ms
+      - lambda: |-
+          auto &H = id(hit_refs);
+          if (H[0] == nullptr) return;
+          for (int i = 0; i < 12; i++)
+            lv_obj_set_style_bg_opa(H[i], LV_OPA_TRANSP, LV_PART_MAIN);
+
   - id: press_slot
     # In CODA, non in parallelo: il componente http_request regge una
     # richiesta alla volta, e due tocchi ravvicinati si facevano fallire a
@@ -383,15 +464,27 @@ script:
     parameters:
       slot: int
     then:
-      - lambda: 'id(press_in_corso)++;'
+      - lambda: 'id(press_in_corso)++; id(slot_in_volo) = slot;'
       - http_request.post:
-          url: "http://${agent_host}:${agent_port}/press"
+          url: !lambda 'return std::string("http://") + id(agent_host_txt).state + ":${agent_port}" + "/press";'
           request_headers:
             X-Deck-Token: !secret deck_token
             Content-Type: application/json
           json: |-
             root["page"] = id(current_page);
             root["slot"] = slot;
+          on_response:
+            then:
+              - script.execute:
+                  id: flash_esito
+                  slot: !lambda 'return id(slot_in_volo);'
+                  ok: !lambda 'return response->status_code == 200;'
+          on_error:
+            then:
+              - script.execute:
+                  id: flash_esito
+                  slot: !lambda 'return id(slot_in_volo);'
+                  ok: false
       - lambda: 'if (id(press_in_corso) > 0) id(press_in_corso)--;' 
 
 interval:
@@ -399,7 +492,16 @@ interval:
     then:
       - if:
           condition:
-            lambda: 'return id(press_in_corso) == 0;'
+            lambda: |-
+              // Un tocco in volo ha la precedenza: lo stato puo' aspettare.
+              if (id(press_in_corso) != 0) return false;
+              // Mac assente (deck portato fuori casa, o Mac chiuso): si
+              // passa da un tentativo ogni 2 s a uno ogni 14. Ogni tentativo
+              // a vuoto costa un blocco del loop lungo quanto il timeout,
+              // e insistere renderebbe il display legnoso proprio quando
+              // non serve a niente. Al ritorno del Mac si riparte da soli.
+              if (!id(agent_online)) return (++id(giri_a_vuoto) % 7) == 0;
+              return true;
           then:
             - script.execute: fetch_state
 
@@ -471,6 +573,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -488,6 +595,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -505,6 +617,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -522,6 +639,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -539,6 +661,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -556,6 +683,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -573,6 +705,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -590,6 +727,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -607,6 +749,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -624,6 +771,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -641,6 +793,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -658,6 +815,11 @@ lvgl:
             border_color: 0x4A9EFF
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -674,6 +836,11 @@ lvgl:
             border_width: 0
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:
@@ -689,6 +856,11 @@ lvgl:
             border_width: 0
             pad_all: 0
             clickable: true
+            pressed:
+              bg_opa: 25%
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0xFFFFFF
             on_click:
               then:
                 - script.execute:

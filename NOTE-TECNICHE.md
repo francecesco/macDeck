@@ -391,11 +391,99 @@ Tre correzioni, dalla causa all'effetto:
   un'assenza vera dura, una collisione no. Un banner che lampeggia al primo
   intoppo insegna a ignorarlo.
 
+### `timeout: 8s` su http_request faceva buttare via gli aggiornamenti
+
+La trappola più costosa dopo `/state`, ed era rimasta nascosta dietro un
+sintomo che non la nominava: si manifesta **solo quando il Mac non risponde**,
+cioè mai, durante lo sviluppo, con l'agent sempre acceso a un metro di
+distanza. Salta fuori esattamente nello scenario per cui il deck è nato:
+portarlo fuori casa.
+
+`http_request` è sincrono: ogni richiesta senza risposta blocca il loop
+principale per l'intero timeout. A 8 s si superava il watchdog di ESP-IDF
+(5 s), il deck si riavviava, e dopo qualche riavvio ravvicinato **ESP-IDF
+tornava alla partizione precedente**, scartando in silenzio il firmware
+appena caricato.
+
+Il sintomo osservato: subito dopo un OTA riuscito l'entità nuova rispondeva;
+qualche minuto dopo era sparita, e `device_info().compilation_time` diceva
+`10:15` mentre il binario in `.pioenvs` era delle `10:23`. Il deck stava
+eseguendo la build precedente.
+
+```bash
+# Come si accerta un rollback, invece di indovinarlo:
+.venv/bin/python -c "...; print(d.compilation_time)"
+stat -f "%Sm" .esphome/build/macdeck/.pioenvs/macdeck/firmware.bin
+```
+
+`8013 ms` compare anche nel log del vecchio crash da watchdog: era lo stesso
+timeout, che allora era stato letto come conseguenza e non come causa.
+
+Ora è **3 s**, e non va rialzato: sotto il watchdog, e comunque tre volte il
+tempo reale di risposta del Mac. In più, quando `agent_online` è falso il
+polling rallenta da 2 s a 14: un deck senza Mac — fuori casa, o col portatile
+chiuso — non deve passare la vita dentro un timeout.
+
+### Il feedback al tocco non deve passare dalla rete
+
+Sono due cose diverse e vanno tenute separate:
+
+- **"ho sentito"** — il velo bianco sotto il dito. È lo stato `pressed` di
+  LVGL, dichiarato nel widget: lo disegna il display da solo, in zero
+  millisecondi, e funziona anche col Mac spento.
+- **"il Mac ha eseguito"** — il lampo verde o rosso. Arriva per forza dopo,
+  quando la POST ha una risposta.
+
+Far dipendere il primo dalla risposta del Mac significherebbe un pulsante che
+sembra rotto ogni volta che la rete respira.
+
+`flash_esito` è `mode: restart` e **spegne tutte le caselle** prima di
+accenderne una: due tocchi ravvicinati interrompono il primo flash a metà, e
+senza quella pulizia una casella resterebbe accesa per sempre. Il parametro
+`slot` non è leggibile dentro `on_response`, quindi passa da un global
+(`slot_in_volo`), che è sicuro solo perché `press_slot` è `mode: queued`.
+
+### Il Mac si presenta al deck, non viceversa
+
+L'IP dell'agent scritto nel firmware funziona in una sola rete. Invertendo la
+direzione il problema sparisce: il deck si annuncia già via Bonjour
+(`_esphomelib._tcp`, gratis con l'API ESPHome), quindi è **l'agent a cercarlo
+e a scrivergli dove trovarsi**, in un'entità `text` con `restore_value: true`.
+Il valore sopravvive al riavvio; su una rete mai vista non c'è nulla da
+configurare.
+
+Dettagli che non sono ovvi:
+
+- L'indirizzo da annunciare si ricava con un socket UDP *connesso* verso il
+  deck (`local_ip_towards`). Con WiFi, Ethernet e VPN insieme, chiedere
+  l'indirizzo dell'hostname locale restituisce la scelta sbagliata.
+- Si riscrive **solo se cambia**: ogni scrittura è un ciclo di flash sul deck.
+- Un `text` template accetta `restore_value: true`, e diventa scrivibile da
+  qualsiasi client API — Home Assistant compreso — senza codice custom.
+
+### La chiusura dell'API si appende subito dopo una scrittura
+
+`await cli.disconnect()` attende una risposta dal deck. Ma appena ricevuto
+l'indirizzo nuovo il deck riparte a chiamarlo, e mentre ci prova **non
+risponde all'API**: il saluto ordinato va in timeout e faceva riportare come
+fallita una scrittura che era invece riuscita — con l'agent che la riprovava
+all'infinito.
+
+La chiusura va quindi forzata, con un timeout suo, e i suoi errori ignorati:
+il lavoro utile è già stato fatto prima.
+
+### Un SSID vuoto non disattiva una rete
+
+`wifi: networks:` rifiuta `ssid: ""` con "SSID can't be empty". Per lasciare
+uno slot libero serve un **segnaposto**: il deck sceglie fra le reti che
+effettivamente vede, quindi un SSID inesistente non costa nulla e non viene
+mai tentato.
+
 ## Comandi utili
 
 ```bash
 cd agent
-.venv/bin/python -m pytest                        # 150 test, nessun hardware
+.venv/bin/python -m pytest                        # 220 test, nessun hardware
 .venv/bin/python -m macdeck.cli doctor            # permessi e configurazione
 .venv/bin/python -m macdeck.cli token             # token da mettere nei secrets
 .venv/bin/python -m macdeck.cli serve             # server in foreground

@@ -209,3 +209,32 @@ chiamate invece di eseguirle.
   protocollo, decisioni e alternative scartate
 - [Piano di implementazione](docs/plans/2026-08-27-macdeck.md) — 14 task
 - [NOTE-TECNICHE.md](NOTE-TECNICHE.md) — note tecniche e trappole incontrate
+
+## Portare il deck fuori casa
+
+Il cavo USB serve solo alla corrente: il deck parla col Mac via WiFi. Basta
+che i due siano sulla stessa rete — qualunque rete.
+
+**Non c'è un indirizzo da configurare.** Il deck si annuncia via Bonjour,
+l'agent sul Mac lo cerca ogni trenta secondi e gli scrive dove trovarsi; il
+deck se lo ricorda anche da spento. Se il router riassegna gli indirizzi a
+entrambi, si ritrovano al giro dopo.
+
+Le reti che il deck conosce stanno in `firmware/secrets.yaml`:
+
+| | |
+|---|---|
+| `wifi_ssid` | casa |
+| `wifi_ssid_2` | Condivisione Internet del Mac — l'SSID è il nome del computer |
+| `wifi_ssid_3` | hotspot del telefono |
+
+Le prova in ordine e si attacca alla prima che vede. Su una rete mai vista,
+il deck alza il proprio access point `MacDeck Fallback`: ci si collega dal
+telefono e gli si passa la rete nuova dal portale.
+
+Col Mac spento il deck resta acceso e rallenta i tentativi a uno ogni
+quattordici secondi; quando il Mac torna, riparte da solo.
+
+`macdeck doctor` dice se il deck è stato trovato, quale indirizzo gli è stato
+annunciato, e se il firewall di macOS è attivo — che fuori casa è la causa
+più frequente di un deck che sembra irraggiungibile.

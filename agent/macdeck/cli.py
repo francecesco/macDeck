@@ -19,6 +19,7 @@ from .app import create_app
 from .executor import Executor
 from .layout import LayoutStore
 from .render import TileCache
+from .discovery import Announcer, firewall_state, read_secret
 from .state import ACCESSIBILITY_SCRIPT, StateProbe
 
 PLIST_LABEL = "io.macdeck.agent"
@@ -62,6 +63,13 @@ def build_serve_app(root: Path | None = None, *, start_probe: bool = False):
         # Le sonde girano in sfondo: /state deve costare ~1 ms, altrimenti il
         # loop del display resta bloccato a ogni poll. Non si avvia nei test.
         probe.start()
+    # Il Mac si presenta al deck: lo cerca via Bonjour e gli scrive dove
+    # trovarsi. Sta accanto alle sonde perche' ha la stessa natura — un
+    # thread che tocca la rete e non deve mai bloccare una richiesta HTTP.
+    announcer = Announcer(
+        psk=read_secret(paths.firmware_secrets(root), "api_key"))
+    if start_probe:
+        announcer.start()
     app = create_app(
         store=store,
         cache=TileCache(),
@@ -70,6 +78,7 @@ def build_serve_app(root: Path | None = None, *, start_probe: bool = False):
         token=token,
         root=root,
     )
+    app.state.announcer = announcer
     return app, token
 
 
@@ -119,6 +128,29 @@ def _doctor(args) -> int:
     vol = stato["volume"]["level"]
     print(f"  {'OK' if vol is not None else 'KO'}   volume leggibile: {vol}")
     print(f"  --   media: {stato['media']['app'] or 'nessun player attivo'}")
+
+    ann = Announcer(psk=read_secret(paths.firmware_secrets(args.root), "api_key"))
+    if ann.psk is None:
+        print("  KO   chiave API assente: l'agent non sa parlare col deck")
+        print(f"       attesa in {paths.firmware_secrets(args.root)}")
+    else:
+        ann.tick()
+        st = ann.status()
+        if st["deck"]:
+            print(f"  OK   deck trovato via Bonjour su {st['deck']}")
+            print(f"  OK   indirizzo annunciato al deck: {st['annunciato']}")
+        else:
+            print("  --   deck non trovato in rete (spento, o su un'altra rete)")
+        if st["ultimo_errore"]:
+            print(f"  KO   annuncio: {st['ultimo_errore']}")
+
+    fw = firewall_state(ex)
+    if fw is True:
+        print("  --   firewall di macOS attivo: alla prima rete nuova puo'")
+        print("       chiedere di autorizzare l'interprete. Se il deck non")
+        print("       si aggiorna fuori casa, il colpevole e' quasi sempre qui.")
+    elif fw is False:
+        print("  OK   firewall di macOS spento: nessuna richiesta in entrata bloccata")
 
     if plist_path().exists():
         print(f"  OK   LaunchAgent installato in {plist_path()}")

@@ -33,3 +33,20 @@ def test_doctor_riporta_esito_senza_sollevare(tmp_path, capsys):
 
 def test_comando_ignoto_da_errore(capsys):
     assert cli.main(["inventato"]) != 0
+
+
+# ------------------------------------------------------ annuncio al deck
+
+
+def test_senza_avvio_sonde_l_annuncio_resta_fermo(tmp_path):
+    # I test non devono mettersi a cercare deck sulla rete di chi compila.
+    app, _ = cli.build_serve_app(root=tmp_path)
+    ann = app.state.announcer
+    assert ann is not None
+    assert ann._thread is None
+
+
+def test_doctor_riporta_lo_stato_dell_annuncio(tmp_path, capsys):
+    cli.main(["doctor", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "deck" in out.lower()

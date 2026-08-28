@@ -21,3 +21,21 @@ def test_sottodirectory_previste(tmp_path):
     assert paths.fonts_dir(root=tmp_path).is_dir()
     assert paths.cache_dir(root=tmp_path).is_dir()
     assert paths.layout_file(root=tmp_path).name == "layout.yaml"
+
+
+# --------------------------------------------------- il secrets del firmware
+
+
+def test_secrets_del_firmware_accanto_al_pacchetto():
+    # L'agent legge la chiave API da dove la tiene ESPHome: un solo file,
+    # nessuna copia da tenere allineata.
+    f = paths.firmware_secrets()
+    assert f.name == "secrets.yaml"
+    assert f.parent.name == "firmware"
+
+
+def test_un_override_esplicito_vince(tmp_path):
+    esplicito = tmp_path / "macdeck" / "secrets.yaml"
+    esplicito.parent.mkdir(parents=True)
+    esplicito.write_text("api_key: xyz\n")
+    assert paths.firmware_secrets(tmp_path) == esplicito

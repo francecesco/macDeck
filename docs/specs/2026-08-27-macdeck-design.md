@@ -580,3 +580,68 @@ reale sul Mac.
 | Alcuni lotti di JC3248W535 ignorano i comandi di window-address | Artefatti a schermo | Il preset ha `draw_rounding: 8`; se serve, aggiornamenti a schermo pieno |
 | Il MacBook cambia rete | Deck muto fuori casa | Accettato: è un accessorio da scrivania. Il banner di errore lo rende evidente |
 | `osascript` lento (~60-100 ms per keystroke) | Latenza percepita sulle scorciatoie | Accettato in v1; `cliclick` è il piano B già identificato |
+
+---
+
+## 11. Il deck fuori casa (aggiunta del 2026-08-28)
+
+L'IP dell'agent scritto nelle `substitutions` legava il deck a una sola rete.
+La richiesta — portarlo in giro, alimentato dal solo cavo di corrente — non
+chiede un trasporto diverso: il trasporto è già WiFi, e l'USB serve solo alla
+corrente da quando il firmware è stato flashato la prima volta. Chiede che il
+deck **sappia trovare il Mac su una rete qualsiasi**.
+
+### Direzione invertita
+
+Il deck si annuncia già via Bonjour come `_esphomelib._tcp`, gratis con l'API
+ESPHome. Quindi è l'agent a cercarlo, e a scrivergli il proprio indirizzo in
+un'entità `text` con `restore_value: true`.
+
+```
+agent (thread, ogni 30 s)
+  └─ zeroconf: cerca _esphomelib._tcp        → 192.168.1.200
+     └─ socket UDP connesso verso il deck    → il mio indirizzo verso di lui
+        └─ API nativa cifrata: se e' cambiato, scrivilo
+           └─ il deck lo salva in NVS e riparte
+```
+
+Tre proprietà che ne discendono:
+
+- **Nessuna configurazione** su una rete mai vista: basta che i due la
+  condividano.
+- **Sopravvive ai cambi di indirizzo** di entrambi, senza riserva DHCP.
+- **Sopravvive al riavvio** del deck anche a Mac spento.
+
+L'entità è scrivibile da qualunque client API — Home Assistant compreso — e
+resta modificabile a mano: il meccanismo automatico non chiude la porta a
+quello manuale.
+
+### Reti
+
+`wifi: networks:` in ordine di preferenza: casa, Condivisione Internet del
+Mac, hotspot del telefono. Il deck sceglie fra quelle che vede. Come ultima
+risorsa alza il proprio access point con portale, da cui si passa una rete
+nuova dal telefono.
+
+### Comportamento senza Mac
+
+Il vincolo che governa tutto è che `http_request` è **sincrono**: ogni
+richiesta senza risposta blocca il loop principale per l'intero timeout. Con
+8 s si superava il watchdog di ESP-IDF, e il deck finiva per tornare alla
+partizione precedente scartando l'aggiornamento.
+
+Quindi: timeout a **3 s**, e polling che rallenta da 2 s a 14 quando l'agent
+risulta assente. Un deck acceso senza Mac resta reattivo al tocco e riprende
+da solo quando il Mac torna.
+
+### Feedback al tocco
+
+Due segnali distinti, deliberatamente disaccoppiati:
+
+| segnale | chi lo disegna | quando |
+|---|---|---|
+| velo bianco sotto il dito | LVGL, stato `pressed` | subito, anche col Mac spento |
+| lampo verde / rosso | `flash_esito`, 300 ms | alla risposta della POST |
+
+Il primo non deve dipendere dalla rete: un pulsante che risponde solo quando
+il Mac risponde è un pulsante che sembra rotto ogni volta che la rete respira.
