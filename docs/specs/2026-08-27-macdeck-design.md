@@ -82,16 +82,40 @@ GPIO1 più `light: monochromatic`. Scelta deliberata — dà dimmerazione e
 auto-spegnimento per inattività senza codice aggiuntivo. `dimensions` resta
 obbligatorio anche con un preset che le contiene già.
 
-### L'orientamento è verticale, e non è una scelta
+### Il landscape passa da LVGL, non dal display
 
 `esphome config` rifiuta il `transform` sul display con **"Axis swapping not
 supported by this model"**: nel preset l'AXS15231 ha `swap_xy=cv.UNDEFINED`.
-Il landscape non è ottenibile e il display resta **320×480 verticale**.
 
-Non è un vincolo da subire: in verticale la griglia di default 3×4 dà tile
-quasi quadrate da **101×99**, che per uno Stream Deck legge meglio del 4×3
-orizzontale. La geometria dinamica del §3.1 assorbe il cambio senza che nulla
-del protocollo si muova.
+La rotazione va chiesta a LVGL, che ESPHome indica esplicitamente come il posto
+giusto. `lvgl: rotation: 90` attiva la rotazione **software** — confermata in
+compilazione da `LVGL will use software rotation` — e ruota anche le coordinate
+del touch, perché il touchscreen è registrato dentro LVGL. Lo spazio utile
+diventa **480×320 landscape**, griglia di default 4×3, tile 115×80.
+
+### Una sola immagine, non dodici
+
+La prima versione scaricava una `online_image` per tile. Sul dispositivo ha
+prodotto due guasti distinti, nessuno dei quali visibile in compilazione:
+
+- **socket esauriti**: ESP-IDF ne ha 10, dodici download paralleli danno
+  `Failed to create socket ... Failed to open a new connection: 32770` e le
+  ultime quattro tile non arrivano mai;
+- **tile invisibili anche quando scaricate**: dopo il download il descrittore
+  dell'immagine cambia, e invalidare il widget non basta — serve ri-assegnare
+  `src`.
+
+La correzione non è alzare il limite dei socket e aggiungere dodici
+`lvgl.image.update`, ma **eliminare la molteplicità**: il Mac compone l'intera
+schermata 480×320 in un unico PNG (`GET /screen/{page}.png`, ~36 KB) e il
+firmware ci sovrappone dodici `obj` trasparenti che raccolgono i tocchi,
+posizionati da `/layout`.
+
+Un socket, un refresh, e il Mac guadagna il controllo di ogni pixel — navbar
+inclusa. Le aree di tocco trasparenti hanno un secondo uso: il bordo di accento
+della chiave di `state` è l'unica cosa che disegnano. L'header resta LVGL,
+perché cambia ogni 2 s e non vale la pena rirenderizzare la schermata per un
+numero di volume.
 
 Firmware di fabbrica salvato come backup (dump di `app0`, 2 MB) prima di
 qualunque flash.
@@ -163,7 +187,8 @@ dei brani.
 | Endpoint | Chi chiama | Quando | Cosa fa |
 |---|---|---|---|
 | `GET /layout?page=N` | display | boot, cambio versione | JSON: numero di pagine, e per ogni slot `x`/`y`/`w`/`h`, url della tile, chiave di stato |
-| `GET /tile/{page}/{slot}.png` | display | dopo `/layout` | PNG RGB della tile, dimensione derivata dalla griglia, renderizzato e cacheato |
+| `GET /screen/{page}.png` | display | al boot e al cambio versione | l'**intera schermata** 480×320 come un unico PNG |
+| `GET /tile/{page}/{slot}.png` | web UI | durante la configurazione | la singola tile, per l'anteprima interattiva |
 | `POST /press` | display | al tocco | `{"page":1,"slot":5}` → esegue, risponde `{"ok":true}` |
 | `GET /state` | display | polling 2 s | volume, mute, brano, CPU, RAM, batteria, **`layout_version`** |
 | `GET /` | browser | configurazione | web UI |
@@ -325,38 +350,36 @@ Il TTF di MDI viene scaricato una volta in `~/.config/macdeck/fonts/`.
 
 ## 5. UI
 
-### 5.1 Display — 320×480 verticale
+### 5.1 Display — 480×320 landscape
 
 ```
-┌────────────────────────────────┐
-│ 38%  ♫ Anagrafe — M.K.  cpu 14%│  header 36 px
-├──────────┬──────────┬──────────┤
-│ VS Code  │ DataGrip │  iTerm   │
-├──────────┼──────────┼──────────┤  griglia 3×4
-│Sourcetree│  Chrome  │ Postman  │  tile 101×99
-├──────────┼──────────┼──────────┤
-│  Docker  │  Slack   │Screenshot│
-├──────────┼──────────┼──────────┤
-│ Mission  │Spotlight │  Blocca  │
-├──────────┴──────────┴──────────┤
-│  ‹    Pagina 1/3 · Dev      ›  │  navbar 28 px
-└────────────────────────────────┘
+┌───────────────────────────────────────────┐
+│ 38%  ♫ Anagrafe — M.K.      cpu 14% b100 !│  header 36 px  (LVGL)
+├──────────┬──────────┬──────────┬──────────┤
+│ VS Code  │ DataGrip │  iTerm   │Sourcetree│
+├──────────┼──────────┼──────────┼──────────┤  griglia 4×3
+│  Chrome  │ Postman  │  Docker  │  Slack   │  tile 115×80
+├──────────┼──────────┼──────────┼──────────┤  (dentro il PNG)
+│Screenshot│ Mission  │Spotlight │  Blocca  │
+├──────────┴──────────┴──────────┴──────────┤
+│  ‹            Dev  1/3               ›    │  navbar 28 px  (nel PNG)
+└───────────────────────────────────────────┘
 ```
 
-Questa è la griglia **di default**, non un vincolo del firmware: 3×4 su un'area
-di 320×416 con gutter da 4 px dà tile di 101×99. `layout.yaml` può dichiarare una
+Tutto ciò che si vede tranne l'header è **un unico PNG** disegnato dal Mac.
+L'header è LVGL perché cambia ogni 2 s.
+
+Questa è la griglia **di default**, non un vincolo del firmware: 4×3 su un'area
+di 480×256 con gutter da 4 px dà tile di 115×80. `layout.yaml` può dichiarare una
 griglia diversa, per pagina, e il renderer ricalcola le dimensioni.
-
-Nessun `transform`, né sul display né sul touchscreen: l'AXS15231B non supporta
-lo scambio degli assi e ESPHome rifiuta la configurazione in validazione.
 
 Le pagine sono **illimitate**: la navbar mostra frecce e indicatori, il firmware
 non ha un numero di pagine compilato. Cambio pagina gestito localmente in LVGL
 (nessun round-trip), poi le tile della nuova pagina si caricano da `/layout`.
 
-Il firmware ha **12 widget immagine** riutilizzati per qualunque griglia: riceve
-per ognuno `x`/`y`/`width`/`height`/`src` e nasconde quelli in eccesso. Dodici è
-il tetto al numero di slot per pagina, non la forma della griglia.
+Il firmware ha **12 aree di tocco trasparenti** riutilizzate per qualunque
+griglia: riceve per ognuna `x`/`y`/`width`/`height` e nasconde quelle in eccesso.
+Dodici è il tetto al numero di slot per pagina, non la forma della griglia.
 
 Backlight: `light: monochromatic` su LEDC GPIO1, spegnimento dopo 5 min di
 inattività, riaccensione al tocco (il primo tocco a schermo spento accende e

@@ -1,7 +1,15 @@
 """Lo stato del Mac che il display mostra nell'header.
 
-Interrogato ogni 2 s, quindi con cache a TTL: ogni osascript costa decine di
-millisecondi e non c'e' ragione di pagarli due volte nello stesso secondo.
+Le sonde girano in un THREAD DI SFONDO e /state restituisce l'ultima
+istantanea dalla memoria, sempre in ~1 ms.
+
+Non e' un'ottimizzazione: e' una correzione. La prima versione calcolava lo
+stato sul percorso della richiesta, con tre osascript da ~0.3-0.6 s ciascuno,
+e una cache a TTL di 1.5 s piu' corta dei 2 s di polling del display: la
+cache non serviva mai il dispositivo e ogni poll pagava 1-2 s. `http_request`
+di ESPHome e' bloccante, quindi quel tempo diventava loop principale fermo, e
+i blocchi accumulati facevano scattare il watchdog del display. Misurato:
+`interval took a long time for an operation (8013 ms)`.
 
 Nota sul dominio: su macOS recente MediaRemote e' chiuso, quindi non esiste
 un "now playing" di sistema leggibile senza helper esterni. Si interrogano i
@@ -11,6 +19,7 @@ non un bug.
 
 from __future__ import annotations
 
+import threading
 import time
 
 import psutil
@@ -62,36 +71,87 @@ _EMPTY_VOLUME = {"level": None, "muted": None}
 _EMPTY_MEDIA = {"app": None, "playing": False, "title": None, "artist": None}
 
 
+EMPTY_SNAPSHOT = {
+    "volume": dict(_EMPTY_VOLUME),
+    "media": dict(_EMPTY_MEDIA),
+    "system": {"cpu": None, "ram": None, "battery": None, "charging": None},
+    "accessibility_ok": None,
+}
+
+
 class StateProbe:
+    """Sonde in sfondo, lettura istantanea.
+
+    `refresh()` fa il lavoro costoso, `snapshot()` non blocca MAI: e' quella
+    la proprieta' che tiene vivo il loop del display.
+    """
+
     def __init__(
         self,
         ex: Executor,
-        ttl: float = 1.5,
-        accessibility_ttl: float = 30.0,
+        interval: float = 1.0,
+        accessibility_interval: float = 30.0,
     ) -> None:
         self.ex = ex
-        self.ttl = ttl
-        self.accessibility_ttl = accessibility_ttl
-        self._cache: dict | None = None
-        self._cache_at = 0.0
+        self.interval = interval
+        self.accessibility_interval = accessibility_interval
+        self._lock = threading.Lock()
+        self._data: dict = dict(EMPTY_SNAPSHOT)
         self._acc: bool | None = None
         self._acc_at = 0.0
         self._last_error: str | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    # ---------------------------------------------------------------- lettura
 
     def note_error(self, msg: str | None) -> None:
         self._last_error = msg
 
     def snapshot(self) -> dict:
-        now = time.monotonic()
-        if self._cache is None or now - self._cache_at >= self.ttl:
-            self._cache = {
-                "volume": self._volume(),
-                "media": self._media(),
-                "system": self._system(),
-                "accessibility_ok": self._accessibility(now),
-            }
-            self._cache_at = now
-        return {**self._cache, "last_error": self._last_error}
+        with self._lock:
+            data = dict(self._data)
+        return {**data, "last_error": self._last_error}
+
+    # ------------------------------------------------------------ aggiornamento
+
+    def refresh(self) -> dict:
+        """Interroga il Mac. Costoso: non va chiamato da un handler HTTP."""
+        fresh = {
+            "volume": self._volume(),
+            "media": self._media(),
+            "system": self._system(),
+            "accessibility_ok": self._accessibility(time.monotonic()),
+        }
+        with self._lock:
+            self._data = fresh
+        return fresh
+
+    # ---------------------------------------------------------------- ciclo
+
+    def start(self) -> None:
+        """Prima lettura sincrona, poi aggiornamenti in sfondo."""
+        if self._thread is not None:
+            return
+        self.refresh()
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._loop, name="macdeck-state", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=5)
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self.interval):
+            try:
+                self.refresh()
+            except Exception:  # noqa: BLE001 - il thread non deve morire mai
+                pass
 
     def _volume(self) -> dict:
         r = self.ex.osascript(VOLUME_SCRIPT)
@@ -131,7 +191,7 @@ class StateProbe:
         }
 
     def _accessibility(self, now: float) -> bool:
-        if self._acc is None or now - self._acc_at >= self.accessibility_ttl:
+        if self._acc is None or now - self._acc_at >= self.accessibility_interval:
             self._acc = self.ex.osascript(ACCESSIBILITY_SCRIPT, timeout=3.0).ok
             self._acc_at = now
         return self._acc

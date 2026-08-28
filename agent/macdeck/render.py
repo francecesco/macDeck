@@ -27,7 +27,9 @@ FONT_ALIASES: dict[str, str] = {
 _FALLBACK_FONT = "/System/Library/Fonts/SFNS.ttf"
 
 CORNER = 10
-PAD = 5
+PAD = 4          # margine orizzontale
+PAD_V = 2        # margine verticale: stretto apposta, l'altezza e' il vincolo
+                 # che limita la dimensione dell'icona
 
 
 def resolve_font(name: str, px: int) -> ImageFont.FreeTypeFont:
@@ -78,18 +80,23 @@ def render_tile(slot: dict, theme: dict, *, root: Path | None = None) -> Image.I
     d.rounded_rectangle([(0, 0), (w - 1, h - 1)], radius=CORNER, fill=bg)
 
     label = slot.get("label") or ""
-    font_px = max(9, min(14, h // 6))
+    font_px = max(9, min(14, h // 7))
     font = resolve_font(theme.get("font", "SFNS"), font_px)
     lines = _wrap(d, label, font, w - 2 * PAD)
-    line_h = font_px + 2
+    line_h = font_px + 1
     text_block = len(lines) * line_h
 
-    icon_area = h - text_block - 2 * PAD
-    icon_px = max(16, min(icon_area, w - 2 * PAD))
+    # L'icona prende tutto lo spazio verticale che l'etichetta non usa.
+    # `icon_scale` nel tema permette di spingerla oltre (o rimpicciolirla)
+    # senza toccare il codice: su griglie basse conviene alzarlo.
+    scale = float(theme.get("icon_scale", 1.0))
+    icon_area = h - text_block - 2 * PAD_V
+    icon_px = max(16, int(min(icon_area, w - 2 * PAD) * scale))
+    icon_px = min(icon_px, h - text_block - PAD_V, w - PAD)
     icon = icons.resolve(slot.get("icon") or "", icon_px, root=root)
-    im.paste(icon, ((w - icon_px) // 2, PAD), icon)
+    im.paste(icon, ((w - icon_px) // 2, PAD_V), icon)
 
-    y = h - PAD - text_block
+    y = h - PAD_V - text_block
     for line in lines:
         d.text((w / 2, y), line, font=font, fill=theme["text"], anchor="ma")
         y += line_h
@@ -138,3 +145,50 @@ class TileCache:
 
     def clear(self) -> None:
         self._data.clear()
+
+
+def render_screen(
+    page: dict,
+    theme: dict,
+    *,
+    page_index: int = 0,
+    page_count: int = 1,
+    root: Path | None = None,
+) -> Image.Image:
+    """Compone l'INTERA schermata: sfondo, tile e navbar.
+
+    Il firmware scarica questa e basta. Dodici immagini separate erano la
+    causa di due problemi distinti sul dispositivo — esaurimento dei socket
+    ESP-IDF (10 disponibili, 12 richieste in parallelo) e la necessita' di
+    re-invalidare ogni widget dopo il download. Una sola immagine li elimina
+    entrambi per costruzione, e da' al Mac il controllo di ogni pixel.
+
+    L'area dell'header resta di solo sfondo: sopra ci va un pannello LVGL con
+    i valori vivi, che cambiano ogni 2 s e non vale la pena rirenderizzare.
+    """
+    from . import layout as L
+
+    im = Image.new("RGB", (L.DISPLAY_W, L.DISPLAY_H), theme["background"])
+    for slot in page["slots"]:
+        box = slot["box"]
+        im.paste(render_tile(slot, theme, root=root), (box["x"], box["y"]))
+
+    d = ImageDraw.Draw(im)
+    nav_y = L.DISPLAY_H - L.NAVBAR_H
+    font = resolve_font(theme.get("font", "SFNS"), 13)
+    d.rectangle([(0, nav_y), (L.DISPLAY_W, L.DISPLAY_H)], fill=theme["background"])
+    for x0, glyph in ((4, "‹"), (L.DISPLAY_W - 64, "›")):
+        d.rounded_rectangle([(x0, nav_y + 2), (x0 + 60, L.DISPLAY_H - 3)],
+                            radius=6, fill=theme["tile"])
+        d.text((x0 + 30, nav_y + 6), glyph, font=font, fill=theme["text"],
+               anchor="ma")
+    d.text((L.DISPLAY_W / 2, nav_y + 6),
+           f"{page['name']}   {page_index + 1}/{page_count}",
+           font=font, fill="#9AA3B2", anchor="ma")
+    return im
+
+
+def screen_png(page: dict, theme: dict, **kw) -> bytes:
+    buf = io.BytesIO()
+    render_screen(page, theme, **kw).save(buf, format="PNG", optimize=True)
+    return buf.getvalue()

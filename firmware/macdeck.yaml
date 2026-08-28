@@ -1,21 +1,32 @@
-# MacDeck — Guition JC3248W535 (ESP32-S3, 3.5" 320x480, AXS15231B QSPI)
+# MacDeck — Guition JC3248W535 (ESP32-S3, AXS15231B QSPI)
 #
-# Il firmware e' un renderer muto: non conosce ne' app ne' icone ne' la
-# griglia. Riceve da /layout la posizione, la dimensione e l'URL di ogni
-# tile, e al tocco manda {page, slot} a /press.
+# Il firmware e' un renderer muto. Scarica UNA immagine a schermo intero dal
+# Mac e ci sovrappone dodici rettangoli trasparenti che raccolgono i tocchi.
+# Non conosce ne' app, ne' icone, ne' la griglia.
 #
-# La geometria si applica chiamando l'API C di LVGL da lambda: x, y, width e
-# height sono proprieta' di stile aggiornabili, ma non e' garantito che
-# accettino !lambda, mentre lv_obj_set_pos/lv_obj_set_size funzionano sempre.
+# PERCHE' UNA SOLA IMMAGINE. La prima versione aveva dodici online_image, una
+# per tile, e sul dispositivo ha prodotto due guasti distinti:
+#   - "Failed to create socket ... Failed to open a new connection: 32770":
+#     ESP-IDF ha 10 socket, dodici download paralleli li esauriscono e le
+#     ultime quattro tile non arrivavano mai;
+#   - ogni widget immagine andava re-invalidato singolarmente dopo il
+#     download, e lo schermo restava nero anche per le tile scaricate.
+# Una immagine sola elimina entrambi per costruzione: un socket, un refresh.
 #
-# ORIENTAMENTO: 320x480 VERTICALE. L'AXS15231B non supporta lo scambio degli
-# assi (swap_xy e' UNDEFINED nel preset di ESPHome, che rifiuta il transform
-# in fase di validazione), quindi il landscape non e' ottenibile. La griglia
-# di default e' 3x4, che in verticale da' tile quasi quadrate da 101x99.
+# ORIENTAMENTO. Il pannello e' 320x480 e l'AXS15231B non supporta lo scambio
+# degli assi: `transform: swap_xy` sul display viene rifiutato in validazione.
+# Il landscape si ottiene con la rotazione SOFTWARE di LVGL, che ruota anche
+# le coordinate del touch perche' il touchscreen e' registrato dentro LVGL.
+# Lo spazio utile diventa 480x320.
 
 substitutions:
   name: macdeck
-  agent_host: "nome-del-mac.local"
+  # IP e non il nome Bonjour: nome-del-mac.local annuncia SEI
+  # indirizzi, fra cui 127.0.0.1 e tre IPv6 di loopback/link-local. Quando
+  # l'ESP ne pesca uno sbagliato si collega a se stesso e resta bloccato
+  # fino al timeout, bloccando il loop principale e facendo scattare il
+  # watchdog. Richiede la riserva DHCP sul router per questo MAC.
+  agent_host: "192.168.1.28"
   agent_port: "8765"
 
 esphome:
@@ -37,14 +48,12 @@ esp32:
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
       CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
       CONFIG_SPIRAM_RODATA: "y"
-      # Fa risolvere i nomi .local dal resolver standard: e' cio' che
-      # permette di chiamare il Mac per nome Bonjour invece che per IP.
+      # Lasciato attivo per comodita' di diagnosi, ma NON ci si appoggia:
+      # vedi il commento su agent_host.
       CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES: "y"
 
 psram:
   mode: octal
-  # 80 MHz e non 120: la plancia ha insegnato che l'instabilita' della PSRAM
-  # si manifesta come rollback OTA silenzioso, pessimo da diagnosticare.
   speed: 80MHz
 
 logger:
@@ -114,8 +123,8 @@ touchscreen:
     i2c_id: touch_bus
     display: main_display
     on_touch:
-      # Il primo tocco a schermo spento riaccende e NON attiva il pulsante
-      # sotto: LVGL e' in pausa, quindi non riceve l'evento.
+      # Il primo tocco a schermo spento riaccende e NON preme nulla: LVGL e'
+      # in pausa, quindi l'evento non raggiunge nessun widget.
       - if:
           condition:
             lambda: 'return !id(backlight).current_values.is_on();'
@@ -127,7 +136,7 @@ touchscreen:
 
 http_request:
   id: http
-  timeout: 4s
+  timeout: 8s
   verify_ssl: false
 
 globals:
@@ -155,149 +164,29 @@ globals:
     type: std::array<std::string, 12>
     restore_value: false
 
-# --------------------------------------------------------------- immagini
-
 online_image:
-  - id: tile_0
-    url: "http://${agent_host}:${agent_port}/tile/0/0.png"
+  - id: screen_img
+    url: "http://${agent_host}:${agent_port}/screen/0.png"
     format: PNG
     type: RGB565
-    buffer_size: 32768
+    buffer_size: 65536
     request_headers:
       X-Deck-Token: !secret deck_token
     on_download_finished:
       then:
-        - lvgl.widget.redraw: tile_img_0
-
-  - id: tile_1
-    url: "http://${agent_host}:${agent_port}/tile/0/1.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
+        # Ri-assegnare src, non solo invalidare: dopo il download il
+        # descrittore dell'immagine e' cambiato e LVGL deve rileggerlo.
+        - lvgl.image.update:
+            id: screen_obj
+            src: screen_img
+    on_error:
       then:
-        - lvgl.widget.redraw: tile_img_1
-
-  - id: tile_2
-    url: "http://${agent_host}:${agent_port}/tile/0/2.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_2
-
-  - id: tile_3
-    url: "http://${agent_host}:${agent_port}/tile/0/3.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_3
-
-  - id: tile_4
-    url: "http://${agent_host}:${agent_port}/tile/0/4.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_4
-
-  - id: tile_5
-    url: "http://${agent_host}:${agent_port}/tile/0/5.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_5
-
-  - id: tile_6
-    url: "http://${agent_host}:${agent_port}/tile/0/6.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_6
-
-  - id: tile_7
-    url: "http://${agent_host}:${agent_port}/tile/0/7.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_7
-
-  - id: tile_8
-    url: "http://${agent_host}:${agent_port}/tile/0/8.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_8
-
-  - id: tile_9
-    url: "http://${agent_host}:${agent_port}/tile/0/9.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_9
-
-  - id: tile_10
-    url: "http://${agent_host}:${agent_port}/tile/0/10.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_10
-
-  - id: tile_11
-    url: "http://${agent_host}:${agent_port}/tile/0/11.png"
-    format: PNG
-    type: RGB565
-    buffer_size: 32768
-    request_headers:
-      X-Deck-Token: !secret deck_token
-    on_download_finished:
-      then:
-        - lvgl.widget.redraw: tile_img_11
+        - logger.log: "download della schermata fallito"
 
 font:
   - file: "gfonts://Roboto"
     id: font_hdr
     size: 15
-    glyphsets: [GF_Latin_Core]
-  - file: "gfonts://Roboto"
-    id: font_nav
-    size: 13
     glyphsets: [GF_Latin_Core]
 
 # ---------------------------------------------------------------- script
@@ -322,28 +211,22 @@ script:
                              response->status_code);
                     return;
                   }
-                  lv_obj_t *imgs[12] = {
-                    id(tile_img_0), id(tile_img_1), id(tile_img_2), id(tile_img_3),
-                    id(tile_img_4), id(tile_img_5), id(tile_img_6), id(tile_img_7),
-                    id(tile_img_8), id(tile_img_9), id(tile_img_10), id(tile_img_11)};
-                  esphome::online_image::OnlineImage *tiles[12] = {
-                    id(tile_0), id(tile_1), id(tile_2), id(tile_3),
-                    id(tile_4), id(tile_5), id(tile_6), id(tile_7),
-                    id(tile_8), id(tile_9), id(tile_10), id(tile_11)};
+                  lv_obj_t *hits[12] = {
+                    id(hit_0), id(hit_1), id(hit_2), id(hit_3),
+                    id(hit_4), id(hit_5), id(hit_6), id(hit_7),
+                    id(hit_8), id(hit_9), id(hit_10), id(hit_11)};
                   bool used[12] = {false};
+                  std::string screen_url;
                   json::parse_json(body, [&](JsonObject root) -> bool {
                     id(layout_version) = root["version"] | -1;
                     id(page_count) = root["pages"].size();
+                    screen_url = std::string(root["screen"] | "");
                     for (JsonObject s : root["slots"].as<JsonArray>()) {
                       int i = s["i"] | -1;
                       if (i < 0 || i > 11) continue;
-                      lv_obj_set_pos(imgs[i], s["x"] | 0, s["y"] | 0);
-                      lv_obj_set_size(imgs[i], s["w"] | 0, s["h"] | 0);
-                      lv_obj_clear_flag(imgs[i], LV_OBJ_FLAG_HIDDEN);
-                      std::string path = s["url"] | "";
-                      tiles[i]->set_url(
-                        "http://${agent_host}:${agent_port}" + path);
-                      tiles[i]->update();
+                      lv_obj_set_pos(hits[i], s["x"] | 0, s["y"] | 0);
+                      lv_obj_set_size(hits[i], s["w"] | 0, s["h"] | 0);
+                      lv_obj_clear_flag(hits[i], LV_OBJ_FLAG_HIDDEN);
                       id(state_keys)[i] = std::string(s["state"] | "");
                       used[i] = true;
                     }
@@ -351,15 +234,15 @@ script:
                   });
                   for (int i = 0; i < 12; i++) {
                     if (!used[i]) {
-                      lv_obj_add_flag(imgs[i], LV_OBJ_FLAG_HIDDEN);
+                      lv_obj_add_flag(hits[i], LV_OBJ_FLAG_HIDDEN);
                       id(state_keys)[i] = "";
                     }
                   }
-      - lvgl.label.update:
-          id: nav_label
-          text: !lambda |-
-            return "Pagina " + to_string(id(current_page) + 1) + "/" +
-                   to_string(id(page_count));
+                  if (!screen_url.empty()) {
+                    id(screen_img)->set_url(
+                      "http://${agent_host}:${agent_port}" + screen_url);
+                    id(screen_img)->update();
+                  }
 
   - id: fetch_state
     mode: restart
@@ -376,10 +259,10 @@ script:
                   if (response->status_code != 200) return;
                   id(fail_streak) = 0;
                   id(agent_online) = true;
-                  lv_obj_t *imgs[12] = {
-                    id(tile_img_0), id(tile_img_1), id(tile_img_2), id(tile_img_3),
-                    id(tile_img_4), id(tile_img_5), id(tile_img_6), id(tile_img_7),
-                    id(tile_img_8), id(tile_img_9), id(tile_img_10), id(tile_img_11)};
+                  lv_obj_t *hits[12] = {
+                    id(hit_0), id(hit_1), id(hit_2), id(hit_3),
+                    id(hit_4), id(hit_5), id(hit_6), id(hit_7),
+                    id(hit_8), id(hit_9), id(hit_10), id(hit_11)};
                   json::parse_json(body, [&](JsonObject root) -> bool {
                     char buf[96];
 
@@ -405,8 +288,8 @@ script:
                     lv_label_set_text(id(hdr_warn), acc ? "" : "!");
 
                     // Bordo di accento sugli slot la cui chiave di stato e'
-                    // veritiera. La chiave e' un percorso puntato dentro
-                    // questo stesso JSON, quindi non serve nessun round-trip.
+                    // veritiera: le aree di tocco sono trasparenti, quindi il
+                    // bordo e' l'unica cosa che disegnano.
                     for (int i = 0; i < 12; i++) {
                       const std::string &key = id(state_keys)[i];
                       bool on = false;
@@ -423,10 +306,8 @@ script:
                         }
                         on = cur.as<bool>();
                       }
-                      lv_obj_set_style_border_width(imgs[i], on ? 3 : 0,
+                      lv_obj_set_style_border_width(hits[i], on ? 3 : 0,
                                                     LV_PART_MAIN);
-                      lv_obj_set_style_border_color(
-                        imgs[i], lv_color_hex(0x4A9EFF), LV_PART_MAIN);
                     }
 
                     // Il canale che serve per volume e brano trasporta anche
@@ -445,8 +326,6 @@ script:
                   if (id(fail_streak) >= 3) id(agent_online) = false;
       - lvgl.label.update:
           id: hdr_offline
-          # std::string esplicito: il ternario fra due letterali darebbe
-          # const char*, e ESPHome ci chiama .c_str() sopra.
           text: !lambda |-
             return std::string(id(agent_online) ? "" : "Mac non raggiungibile");
 
@@ -486,6 +365,8 @@ interval:
 lvgl:
   displays: [main_display]
   touchscreens: [main_touch]
+  # Rotazione SOFTWARE: il driver non ha quella hardware. Ruota anche il touch.
+  rotation: 90
   bg_color: 0x12141A
   on_idle:
     timeout: 5min
@@ -497,7 +378,7 @@ lvgl:
       - obj:
           x: 0
           y: 0
-          width: 320
+          width: 480
           height: 36
           bg_color: 0x12141A
           bg_opa: COVER
@@ -507,30 +388,30 @@ lvgl:
           widgets:
             - label:
                 id: hdr_volume
-                x: 6
+                x: 8
                 y: 10
                 text: "--"
                 text_color: 0xE8EAF0
                 text_font: font_hdr
             - label:
                 id: hdr_media
-                x: 52
+                x: 70
                 y: 10
-                width: 160
+                width: 200
                 text: ""
                 text_color: 0x9AA3B2
                 text_font: font_hdr
                 long_mode: DOT
             - label:
                 id: hdr_system
-                x: 216
+                x: 290
                 y: 10
                 text: ""
                 text_color: 0x9AA3B2
                 text_font: font_hdr
             - label:
                 id: hdr_warn
-                x: 306
+                x: 462
                 y: 10
                 text: ""
                 text_color: 0xFFAA3C
@@ -539,7 +420,7 @@ lvgl:
                 id: hdr_offline
                 x: 0
                 y: 10
-                width: 320
+                width: 480
                 text: ""
                 align: CENTER
                 text_color: 0xFF6B6B
@@ -547,198 +428,246 @@ lvgl:
   pages:
     - id: deck_page
       widgets:
+        # L'intera schermata, disegnata dal Mac.
         - image:
-            id: tile_img_0
-            src: tile_0
+            id: screen_obj
+            src: screen_img
+            x: 0
+            y: 0
+            width: 480
+            height: 320
+        # Dodici aree di tocco trasparenti: posizione e visibilita' le decide
+        # il Mac via /layout. Il bordo compare quando la chiave di stato e' vera.
+        - obj:
+            id: hit_0
             x: 4
             y: 40
-            width: 101
-            height: 99
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 0
-        - image:
-            id: tile_img_1
-            src: tile_1
-            x: 109
+        - obj:
+            id: hit_1
+            x: 123
             y: 40
-            width: 101
-            height: 99
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 1
-        - image:
-            id: tile_img_2
-            src: tile_2
-            x: 214
+        - obj:
+            id: hit_2
+            x: 242
             y: 40
-            width: 101
-            height: 99
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 2
-        - image:
-            id: tile_img_3
-            src: tile_3
-            x: 4
-            y: 143
-            width: 101
-            height: 99
+        - obj:
+            id: hit_3
+            x: 361
+            y: 40
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 3
-        - image:
-            id: tile_img_4
-            src: tile_4
-            x: 109
-            y: 143
-            width: 101
-            height: 99
+        - obj:
+            id: hit_4
+            x: 4
+            y: 124
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 4
-        - image:
-            id: tile_img_5
-            src: tile_5
-            x: 214
-            y: 143
-            width: 101
-            height: 99
+        - obj:
+            id: hit_5
+            x: 123
+            y: 124
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 5
-        - image:
-            id: tile_img_6
-            src: tile_6
-            x: 4
-            y: 246
-            width: 101
-            height: 99
+        - obj:
+            id: hit_6
+            x: 242
+            y: 124
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 6
-        - image:
-            id: tile_img_7
-            src: tile_7
-            x: 109
-            y: 246
-            width: 101
-            height: 99
+        - obj:
+            id: hit_7
+            x: 361
+            y: 124
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 7
-        - image:
-            id: tile_img_8
-            src: tile_8
-            x: 214
-            y: 246
-            width: 101
-            height: 99
+        - obj:
+            id: hit_8
+            x: 4
+            y: 208
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 8
-        - image:
-            id: tile_img_9
-            src: tile_9
-            x: 4
-            y: 349
-            width: 101
-            height: 99
+        - obj:
+            id: hit_9
+            x: 123
+            y: 208
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 9
-        - image:
-            id: tile_img_10
-            src: tile_10
-            x: 109
-            y: 349
-            width: 101
-            height: 99
+        - obj:
+            id: hit_10
+            x: 242
+            y: 208
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 10
-        - image:
-            id: tile_img_11
-            src: tile_11
-            x: 214
-            y: 349
-            width: 101
-            height: 99
+        - obj:
+            id: hit_11
+            x: 361
+            y: 208
+            width: 115
+            height: 80
+            radius: 10
+            bg_opa: TRANSP
+            border_width: 0
+            border_color: 0x4A9EFF
+            pad_all: 0
             clickable: true
             on_click:
               then:
                 - script.execute:
                     id: press_slot
                     slot: 11
-        - button:
+        # Navigazione: trasparenti, la grafica la disegna il Mac nell'immagine.
+        - obj:
             id: nav_prev
             x: 4
-            y: 452
+            y: 292
             width: 60
             height: 24
-            widgets:
-              - label:
-                  text: "<"
-                  align: CENTER
-                  text_font: font_nav
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            clickable: true
             on_click:
               then:
                 - script.execute:
                     id: change_page
                     delta: -1
-        - label:
-            id: nav_label
-            x: 70
-            y: 456
-            width: 180
-            text: "Pagina 1/1"
-            align: CENTER
-            text_color: 0x9AA3B2
-            text_font: font_nav
-        - button:
+        - obj:
             id: nav_next
-            x: 256
-            y: 452
+            x: 416
+            y: 292
             width: 60
             height: 24
-            widgets:
-              - label:
-                  text: ">"
-                  align: CENTER
-                  text_font: font_nav
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            clickable: true
             on_click:
               then:
                 - script.execute:

@@ -19,14 +19,21 @@ Il firmware Arduino di fabbrica contiene le stringhe `JC3248W535` e `guition`.
 Il dump è conservato in `backup/app0-factory.bin`: senza di esso non si torna
 indietro.
 
-### L'orientamento è verticale e non è una scelta
+### Il landscape si ottiene da LVGL, non dal display
 
 `esphome config` rifiuta il `transform` sul display con **"Axis swapping not
-supported by this model"**: nel preset di ESPHome l'AXS15231 ha
-`swap_xy=cv.UNDEFINED`. Il display resta 320×480 verticale.
+supported by this model"**: nel preset l'AXS15231 ha `swap_xy=cv.UNDEFINED`.
 
-Non è un problema da aggirare: in verticale una griglia 3×4 dà tile da 101×99,
-quasi quadrate, che per uno Stream Deck legge meglio del 4×3 orizzontale.
+La soluzione **non** è rassegnarsi al verticale. ESPHome dice esplicitamente
+dove va messa la rotazione:
+
+> use of 'rotation' in the display config is not compatible with LVGL, please
+> set rotation in the LVGL config instead
+
+`lvgl: rotation: 90` usa la rotazione **software** quando il driver non ha
+quella hardware, e ruota anche le coordinate del touch perché il touchscreen è
+registrato dentro LVGL. Lo spazio utile diventa 480×320 e tutte le coordinate
+dei widget si esprimono in quello spazio.
 
 ### Il preset non gestisce il backlight
 
@@ -88,6 +95,39 @@ riservarlo nel DHCP del router.
 riaccende e chiama `lvgl.resume`, ma non arriva a nessun widget perché LVGL era
 in pausa. Senza la pausa, riaccendere lo schermo lancerebbe un'app a caso.
 
+### Dodici `online_image` non funzionano: ne serve una
+
+La prima versione aveva un `online_image` per tile. Sul dispositivo ha prodotto
+**due guasti distinti**, entrambi invisibili in compilazione:
+
+```
+E esp-tls: Failed to create socket (family 2 socktype 1 protocol 0)
+E transport_base: Failed to open a new connection: 32770
+E online_image: Download failed.
+```
+
+ESP-IDF ha **10 socket** di default: dodici download paralleli ne esauriscono
+la scorta e le ultime quattro tile non arrivavano mai. E anche le otto
+scaricate **restavano invisibili**, perché dopo il download il descrittore
+dell'immagine cambia e `lvgl.widget.redraw` (che si limita a invalidare) non
+basta: serve ri-assegnare `src` con `lvgl.image.update`.
+
+La correzione non è alzare `CONFIG_LWIP_MAX_SOCKETS` e aggiungere dodici
+`lvgl.image.update`. È **una sola immagine a schermo intero**, renderizzata dal
+Mac, con sopra dodici `obj` trasparenti che raccolgono i tocchi: un socket, un
+refresh, e in più il Mac guadagna il controllo di ogni pixel, navbar inclusa.
+
+Le aree di tocco trasparenti hanno un secondo uso: il bordo di accento per la
+chiave di `state` è l'unica cosa che disegnano.
+
+### Il tempo di decodifica PNG sul dispositivo
+
+`online_image took a long time for an operation (271 ms), max is 30 ms` è un
+avviso di ESPHome, non un errore: decodificare PNG sull'ESP32 costa. Con una
+sola immagine scaricata solo al cambio di `layout_version` è un costo pagato
+raramente. Se diventasse fastidioso, servire BMP invece di PNG toglie la
+decompressione zlib al prezzo di più byte sulla rete.
+
 ## Agent
 
 ### `osascript -e 'path to application …'` può appendersi per sempre
@@ -148,6 +188,61 @@ funzionare. `save()` valida **prima** di scrivere: nessuna scrittura parziale.
 La web UI replica in JavaScript il calcolo di `slot_boxes`. `test_web.py`
 verifica che le costanti nell'HTML combacino con quelle di `layout.py`: se
 qualcuno cambia `DISPLAY_H` senza aggiornare la GUI, l'anteprima mentirebbe.
+
+### /state non deve mai essere calcolato sul percorso della richiesta
+
+Il guasto più costoso di questo progetto, e la sua diagnosi merita di essere
+ricordata perché il sintomo puntava dalla parte sbagliata.
+
+**Sintomo:** il display crashava al tocco, con
+`Reason: Fault - Unknown, Crashed core: 1` e un backtrace che diceva
+`esp_cpu_wait_for_intr → prvIdleTask`. Sembrava un problema del firmware.
+
+**Quel backtrace è il core 1 fermo in idle**, cioè nessuna informazione: è la
+firma di un watchdog, non del punto di guasto. Il dato vero era nei log
+seriali, non nel canale API:
+
+```
+[W][component:522]: interval took a long time for an operation (8013 ms)
+```
+
+8013 ms è esattamente il timeout di `http_request`. Il loop principale di
+ESPHome restava bloccato per secondi a ogni poll di `/state`, e i blocchi
+accumulati facevano scattare il watchdog.
+
+**Prima ipotesi, sbagliata:** risoluzione mDNS lenta. Il nome Bonjour del Mac
+annuncia davvero sei indirizzi, `127.0.0.1` compreso, il che è un problema
+reale — ma passare all'IP **non** ha cambiato nulla. Ipotesi refutata.
+
+**Causa vera, misurata:** `/state` costava 1,1–1,8 s perché veniva calcolato
+sul percorso della richiesta lanciando tre `osascript`, e la cache a TTL di
+1,5 s era più corta dei 2 s di polling del display: non serviva mai il
+dispositivo. Il dato decisivo è stato misurare la latenza lato Mac invece di
+speculare sul firmware:
+
+```
+connect 0.005s → totale 1.814s     ← calcolo a freddo
+connect 0.004s → totale 0.010s     ← cache TTL
+```
+
+Connessione istantanea, risposta lentissima: il problema era il server.
+
+**Correzione:** le sonde girano in un thread di sfondo e `snapshot()` legge
+dalla memoria. `/state` è passato da 1100–1800 ms a **7–37 ms**, e i blocchi
+sul display sono spariti (75 s di regime, zero messaggi).
+
+Il test `test_snapshot_non_interroga_mai_il_mac` esiste per impedire che
+qualcuno rimetta una chiamata costosa dentro `snapshot()`.
+
+### Le icone sono limitate dall'altezza, non dalla larghezza
+
+Passare da 4×3 a 3×3 allarga le tile da 115 a 154 px ma **non le alza**: le
+righe restano tre nella stessa fascia di 256 px, quindi l'icona cresce di
+pochissimo. Per ingrandirla davvero bisogna togliere una riga: 3×2 dà tile
+154×122 e icone del 60% più grandi.
+
+`theme.icon_scale` permette di regolare la dimensione senza toccare il
+codice, e il renderer limita comunque l'icona al box della tile.
 
 ## Comandi utili
 

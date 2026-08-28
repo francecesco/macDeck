@@ -39,7 +39,7 @@ def ctx(tmp_path, fake_ex):
     store = L.LayoutStore(tmp_path / "layout.yaml")
     store.load()
     store.save(LAYOUT_DI_PROVA)
-    probe = StateProbe(fake_ex, ttl=0.0)
+    probe = StateProbe(fake_ex)
     app = create_app(
         store=store, cache=TileCache(), probe=probe,
         executor=fake_ex, token=TOKEN, root=tmp_path,
@@ -78,7 +78,7 @@ def test_tile_restituisce_un_png_della_dimensione_giusta(ctx):
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (101, 99)
+        assert im.size == (154, 80)
 
 
 def test_tile_di_uno_slot_vuoto(ctx):
@@ -231,12 +231,12 @@ def test_tile_preview_rende_una_tile_non_salvata(ctx, tmp_path):
     client, store, *_ = ctx
     prima = store.version
     r = client.post("/api/tile-preview", headers=LOCAL, json={
-        "grid": {"cols": 3, "rows": 4},
+        "grid": {"cols": 3, "rows": 3},
         "slot": {"pos": [1, 1], "label": "Bozza", "icon": "text:B"},
     })
     assert r.status_code == 200
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (101, 99)
+        assert im.size == (154, 80)
     assert store.version == prima          # l'anteprima non salva nulla
 
 
@@ -247,7 +247,7 @@ def test_tile_preview_rispetta_la_griglia_richiesta(ctx):
         "slot": {"pos": [0, 0], "label": "Grande", "icon": "text:G"},
     })
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (154, 202)
+        assert im.size == (234, 122)
 
 
 def test_tile_preview_rifiuta_una_griglia_impossibile(ctx):
@@ -257,3 +257,44 @@ def test_tile_preview_rifiuta_una_griglia_impossibile(ctx):
         "slot": {"pos": [0, 0], "label": "X", "icon": "text:X"},
     })
     assert r.status_code == 422
+
+
+def test_screen_e_un_png_a_schermo_intero(ctx):
+    client, *_ = ctx
+    r = client.get("/screen/0.png", headers=AUTH)
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (L.DISPLAY_W, L.DISPLAY_H)
+
+
+def test_screen_richiede_il_token(ctx):
+    client, *_ = ctx
+    assert client.get("/screen/0.png").status_code == 401
+
+
+def test_screen_pagina_inesistente(ctx):
+    client, *_ = ctx
+    assert client.get("/screen/9.png", headers=AUTH).status_code == 404
+
+
+def test_layout_indica_lurl_della_schermata(ctx):
+    client, store, *_ = ctx
+    body = client.get("/layout", headers=AUTH).json()
+    assert body["screen"] == f"/screen/0.png?v={store.version}"
+
+
+def test_screen_cambia_dopo_un_salvataggio(ctx):
+    client, *_ = ctx
+    prima = client.get("/screen/0.png", headers=AUTH).content
+    client.put("/api/config", headers=LOCAL, json={"pages": [{
+        "name": "Altro", "slots": [{"pos": [0, 0], "label": "Z", "icon": "text:Z",
+                                    "action": {"type": "noop"}}]}]})
+    dopo = client.get("/screen/0.png", headers=AUTH).content
+    assert prima != dopo
+
+
+def test_screen_di_una_pagina_vuota_non_esplode(ctx):
+    client, *_ = ctx
+    r = client.get("/screen/1.png", headers=AUTH)
+    assert r.status_code == 200

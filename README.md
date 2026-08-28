@@ -10,14 +10,15 @@ flasha una volta e non lo si tocca più.
 ## Come funziona
 
 Il firmware ESPHome è un **renderer muto**: non conosce né app né icone né la
-griglia. Riceve da `/layout` la posizione, la dimensione e l'URL di ogni tile —
-già renderizzata dal Mac come PNG — e al tocco manda `{page, slot}` a `/press`.
-Tutta la conoscenza del mondo sta in `~/.config/macdeck/layout.yaml`.
+griglia. Scarica da `/screen/{page}.png` **una sola immagine a schermo intero**
+composta dal Mac, ci sovrappone dodici rettangoli trasparenti posizionati da
+`/layout`, e al tocco manda `{page, slot}` a `/press`. Tutta la conoscenza del
+mondo sta in `~/.config/macdeck/layout.yaml`.
 
 ```
 ┌─────────────────────────┐         ┌──────────────────────────────────┐
 │  JC3248W535 (ESPHome)   │  WiFi   │  Mac — agent `macdeck` (Python)  │
-│  12 widget immagine     │◄───────►│  FastAPI su :8765                │
+│  1 immagine + 12 tocchi │◄───────►│  FastAPI su :8765                │
 │  + header di stato      │  HTTP   │  web UI · azioni · renderer      │
 │  NESSUNA logica         │         │  layout.yaml  ← sorgente unica   │
 └─────────────────────────┘         └──────────────────────────────────┘
@@ -43,7 +44,7 @@ manda l'immagine finita della tile, composta da Pillow. Questo:
   dei bundle), tutti i **7447 glifi MDI**, qualunque PNG ed emoji a colori;
 - sposta tipografia, colori e composizione in codice Python modificabile a caldo.
 
-Costo: ~250 KB di PSRAM su 8 MB, e 12 GET HTTP al boot.
+Costo: ~250 KB di PSRAM su 8 MB, e **una** GET HTTP quando cambia il layout.
 
 ## Hardware
 
@@ -51,13 +52,13 @@ Costo: ~250 KB di PSRAM su 8 MB, e 12 GET HTTP al boot.
 |---|---|
 | Scheda | Guition JC3248W535 (venduta anche come "Diymore ESP32-S3 3.5\"") |
 | Chip | ESP32-S3, 16 MB flash, 8 MB PSRAM ottale (`N16R8`) |
-| Display | 3.5" IPS **320×480 verticale**, AXS15231B su bus QSPI |
+| Display | 3.5" IPS 320×480, AXS15231B su bus QSPI — usato in **landscape 480×320** |
 | Touch | capacitivo integrato nell'AXS15231B, I²C `0x3B` |
 
-**L'orientamento è verticale e non è negoziabile:** l'AXS15231B non supporta lo
-scambio degli assi (`swap_xy` è `UNDEFINED` nel preset di ESPHome, che rifiuta il
-`transform` in validazione). In verticale la griglia di default 3×4 dà tile quasi
-quadrate da 101×99, che per uno Stream Deck funziona meglio del 4×3 orizzontale.
+**Il landscape passa da LVGL, non dal display:** l'AXS15231B non supporta lo
+scambio degli assi e ESPHome rifiuta il `transform`. Si usa `lvgl: rotation: 90`,
+che ruota via software e ruota anche il touch. Lo spazio utile è 480×320 e la
+griglia di default è 3×3 con tile da 154×80. Meno righe = icone più grandi: 3×2 dà tile 154×122.
 
 Pinout: QSPI CLK 47, data 21/48/40/39, CS 45 · backlight GPIO1 (LEDC) · touch I²C
 SDA 4, SCL 8. Supporto ESPHome **nativo** (`mipi_spi` con preset `JC3248W535` +
@@ -114,13 +115,14 @@ qualunque flash.
 
 ```yaml
 schema: 1
-grid: {cols: 3, rows: 4}
+grid: {cols: 3, rows: 3}
 theme:
   background: "#12141A"
   tile: "#1E222B"
   text: "#E8EAF0"
   accent: "#4A9EFF"
   font: SFNS
+  icon_scale: 1.0        # moltiplicatore della dimensione dell'icona
 pages:
   - name: Dev
     slots:
@@ -138,7 +140,7 @@ pages:
             - {type: keys, keys: "cmd+s"}
             - {type: delay, ms: 200}
             - {type: shell, cmd: "cd ~/src/foo && git add -A && git commit -m wip"}
-      - pos: [2, 3]
+      - pos: [2, 2]
         label: Muto
         icon: "mdi:volume-off"
         action: {type: volume, op: mute_toggle}
@@ -183,7 +185,7 @@ immagine) · `emoji:` (a colori) · `text:` (fino a 3 caratteri).
   display mostra "Mac non raggiungibile" invece di fallire in silenzio.
 - **Ogni keystroke costa ~60-100 ms** perché passa da `osascript`. Se diventasse
   un problema, il piano B è `cliclick`: una funzione da riscrivere, non un rewrite.
-- **12 slot per pagina**, che è il numero di widget immagine nel firmware. Le
+- **12 slot per pagina al massimo**, che è il numero di widget immagine nel firmware. Le
   pagine sono illimitate.
 
 ## Test

@@ -53,14 +53,19 @@ def render_plist(python: str, module_dir: str) -> str:
 """
 
 
-def build_serve_app(root: Path | None = None):
+def build_serve_app(root: Path | None = None, *, start_probe: bool = False):
     store = LayoutStore(paths.layout_file(root))
     store.load()
     token = paths.load_or_create_token(root)
+    probe = StateProbe(Executor())
+    if start_probe:
+        # Le sonde girano in sfondo: /state deve costare ~1 ms, altrimenti il
+        # loop del display resta bloccato a ogni poll. Non si avvia nei test.
+        probe.start()
     app = create_app(
         store=store,
         cache=TileCache(),
-        probe=StateProbe(Executor()),
+        probe=probe,
         executor=Executor(),
         token=token,
         root=root,
@@ -71,7 +76,7 @@ def build_serve_app(root: Path | None = None):
 def _serve(args) -> int:
     import uvicorn
 
-    app, token = build_serve_app(args.root)
+    app, token = build_serve_app(args.root, start_probe=True)
     print(f"MacDeck su http://127.0.0.1:{PORT}  (token: {token})", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
     return 0
@@ -110,7 +115,7 @@ def _doctor(args) -> int:
         print("  --   font MDI assente: esegui `macdeck fetch-fonts` "
               "se vuoi usare le icone mdi:")
 
-    stato = StateProbe(ex, ttl=0.0).snapshot()
+    stato = StateProbe(ex).refresh()
     vol = stato["volume"]["level"]
     print(f"  {'OK' if vol is not None else 'KO'}   volume leggibile: {vol}")
     print(f"  --   media: {stato['media']['app'] or 'nessun player attivo'}")

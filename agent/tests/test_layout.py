@@ -6,24 +6,29 @@ from macdeck import layout as L
 
 def test_geometria_della_griglia_di_default():
     boxes = L.slot_boxes(L.DEFAULT_GRID)
-    assert len(boxes) == 12
-    assert boxes[0] == {"x": 4, "y": 40, "w": 101, "h": 99}
-    last = boxes[11]
+    assert len(boxes) == 9
+    assert boxes[0] == {"x": 4, "y": 40, "w": 154, "h": 80}
+    last = boxes[max(boxes)]
     assert last["x"] + last["w"] <= L.DISPLAY_W
     assert last["y"] + last["h"] <= L.DISPLAY_H - L.NAVBAR_H
 
 
-def test_griglia_piu_rada_da_tile_piu_grandi():
-    boxes = L.slot_boxes({"cols": 2, "rows": 2})
-    assert len(boxes) == 4
-    assert boxes[0]["w"] > 101
-    assert boxes[0]["h"] > 99
+def test_meno_righe_danno_tile_piu_alte():
+    """L'altezza e' il vincolo che limita la dimensione dell'icona.
+
+    Allargare la griglia (meno colonne) allarga le tile ma non le alza:
+    per ingrandire davvero l'icona bisogna togliere una riga.
+    """
+    tre_righe = L.slot_boxes({"cols": 3, "rows": 3})[0]
+    due_righe = L.slot_boxes({"cols": 3, "rows": 2})[0]
+    assert due_righe["w"] == tre_righe["w"]
+    assert due_righe["h"] > tre_righe["h"]
 
 
 def test_slot_index_e_riga_per_colonne_piu_colonna():
-    assert L.slot_index([0, 0], {"cols": 3, "rows": 4}) == 0
-    assert L.slot_index([2, 0], {"cols": 3, "rows": 4}) == 2
-    assert L.slot_index([1, 2], {"cols": 3, "rows": 4}) == 7
+    assert L.slot_index([0, 0], {"cols": 3, "rows": 3}) == 0
+    assert L.slot_index([2, 0], {"cols": 3, "rows": 3}) == 2
+    assert L.slot_index([1, 2], {"cols": 3, "rows": 3}) == 7
 
 
 def test_layout_di_default_e_valido():
@@ -46,7 +51,7 @@ def test_validate_calcola_geometria_e_indice_per_ogni_slot():
     })
     slot = out["pages"][0]["slots"][0]
     assert slot["index"] == 1
-    assert slot["box"] == {"x": 109, "y": 40, "w": 101, "h": 99}
+    assert slot["box"] == {"x": 162, "y": 40, "w": 154, "h": 80}
 
 
 @pytest.mark.parametrize("raw,atteso", [
@@ -54,7 +59,7 @@ def test_validate_calcola_geometria_e_indice_per_ogni_slot():
     ({"pages": []}, "almeno una pagina"),
     ({"pages": [{"slots": []}]}, "name"),
     ({"grid": {"cols": 9, "rows": 9}, "pages": [{"name": "X", "slots": []}]}, "12"),
-    ({"pages": [{"name": "X", "slots": [{"pos": [5, 0], "label": "A",
+    ({"pages": [{"name": "X", "slots": [{"pos": [7, 0], "label": "A",
       "icon": "text:A", "action": {"type": "noop"}}]}]}, "fuori dalla griglia"),
     ({"pages": [{"name": "X", "slots": [
         {"pos": [0, 0], "label": "A", "icon": "text:A", "action": {"type": "noop"}},

@@ -31,11 +31,11 @@ button:disabled{opacity:.45;cursor:default}
 .banner code{background:#0006;padding:1px 5px;border-radius:4px;user-select:all}
 main{display:flex;gap:22px;padding:18px;align-items:flex-start;flex-wrap:wrap}
 .left{display:flex;flex-direction:column;gap:10px}
-.tabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center;max-width:340px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center;max-width:490px}
 .tabs .tab{padding:5px 11px;border-radius:6px;border:1px solid var(--line);
            background:var(--panel2);cursor:pointer;font-size:13px}
 .tabs .tab.on{border-color:var(--accent);color:var(--accent)}
-#screen{position:relative;width:320px;height:480px;border-radius:14px;
+#screen{position:relative;width:480px;height:320px;border-radius:14px;
         border:1px solid var(--line);overflow:hidden;flex:none;
         box-shadow:0 8px 30px #0008}
 #screen .chrome{position:absolute;left:0;right:0;color:var(--dim);font-size:11px;
@@ -123,9 +123,10 @@ textarea{min-height:76px;font-family:ui-monospace,Menlo,monospace;font-size:12.5
 
 <script>
 // ---------------------------------------------------------------- geometria
-// Replica del calcolo di layout.py: il display e' 320x480 VERTICALE perche'
-// l'AXS15231B non supporta lo scambio degli assi.
-const DW=320, DH=480, HEADER=36, NAVBAR=28, GUT=4, MAX_SLOTS=12;
+// Replica del calcolo di layout.py. Il pannello e' 320x480, ma LVGL lo ruota
+// via software (rotation: 90) e ruota anche il touch: lo spazio utile e'
+// 480x320 landscape, ed e' in quello che si ragiona qui.
+const DW=480, DH=320, HEADER=36, NAVBAR=28, GUT=4, MAX_SLOTS=12;
 
 function slotBoxes(grid){
   const cols=grid.cols, rows=grid.rows;

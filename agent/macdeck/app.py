@@ -46,6 +46,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="MacDeck", docs_url=None, redoc_url=None)
     pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="macdeck")
+    screens: dict[tuple[int, int], bytes] = {}   # (pagina, versione) -> PNG
 
     def require_token(x_deck_token: str | None = Header(default=None)) -> None:
         if not x_deck_token or not hmac.compare_digest(x_deck_token, token):
@@ -88,6 +89,7 @@ def create_app(
             "grid": p["grid"],
             "background": theme["background"],
             "accent": theme["accent"],
+            "screen": f"/screen/{page}.png?v={store.version}",
             "slots": [
                 {
                     "i": s["index"],
@@ -106,6 +108,26 @@ def create_app(
     def get_tile(page: int, slot: int) -> Response:
         s = _slot(page, slot)
         png = cache.png(s, store.layout["theme"], root=root)
+        return Response(content=png, media_type="image/png")
+
+    @app.get("/screen/{page}.png", dependencies=[Depends(require_token)])
+    def get_screen(page: int) -> Response:
+        """L'intera schermata come un unico PNG.
+
+        E' cio' che il firmware scarica davvero: una richiesta invece di
+        dodici. Vedi render.render_screen per il perche'.
+        """
+        p = _page(page)
+        key = (page, store.version)
+        png = screens.get(key)
+        if png is None:
+            png = render.screen_png(
+                p, store.layout["theme"],
+                page_index=page, page_count=len(store.layout["pages"]),
+                root=root,
+            )
+            screens.clear()          # una sola versione per volta in memoria
+            screens[key] = png
         return Response(content=png, media_type="image/png")
 
     @app.post("/press", dependencies=[Depends(require_token)])
@@ -171,6 +193,7 @@ def create_app(
         except L.LayoutError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
         cache.clear()
+        screens.clear()
         return {"ok": True, "version": store.version}
 
     @app.post("/api/test", dependencies=[Depends(require_local)])

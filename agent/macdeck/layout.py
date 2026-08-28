@@ -1,9 +1,10 @@
 """Il layout e' la sorgente di verita' del deck.
 
-Il display e' 320x480 VERTICALE: l'AXS15231B non supporta lo scambio degli
-assi (`swap_xy` e' UNDEFINED nel preset di ESPHome), quindi il landscape non
-e' ottenibile via transform. La griglia di default e' 3x4, che in verticale
-da' tile quasi quadrate da 101x99.
+Il pannello e' 320x480 e l'AXS15231B non supporta lo scambio degli assi, ma
+LVGL ha una propria rotazione software che ruota anche le coordinate del
+touch. Con `lvgl: rotation: 90` lo spazio utile diventa 480x320 landscape,
+ed e' in quello spazio che questo modulo calcola tutto. Griglia di default
+3x3, tile 154x80.
 
 Due proprieta' che i test bloccano deliberatamente:
 
@@ -23,14 +24,14 @@ import yaml
 
 from .actions import known_types
 
-DISPLAY_W = 320
-DISPLAY_H = 480
+DISPLAY_W = 480
+DISPLAY_H = 320
 HEADER_H = 36
 NAVBAR_H = 28
 GUTTER = 4
 MAX_SLOTS = 12
 
-DEFAULT_GRID: dict[str, int] = {"cols": 3, "rows": 4}
+DEFAULT_GRID: dict[str, int] = {"cols": 3, "rows": 3}
 
 DEFAULT_THEME: dict[str, str] = {
     "background": "#12141A",
@@ -38,6 +39,9 @@ DEFAULT_THEME: dict[str, str] = {
     "text": "#E8EAF0",
     "accent": "#4A9EFF",
     "font": "SFNS",
+    # Moltiplicatore della dimensione dell'icona. 1.0 = tutto lo spazio che
+    # l'etichetta lascia libero. Su griglie con poche righe conviene alzarlo.
+    "icon_scale": 1.0,
 }
 
 DEFAULT_LAYOUT: dict[str, Any] = {
@@ -74,13 +78,6 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                  "action": {"type": "app", "target": "Slack"}},
                 {"pos": [2, 2], "label": "Screenshot", "icon": "mdi:camera",
                  "action": {"type": "keys", "keys": "cmd+shift+4"}},
-                {"pos": [0, 3], "label": "Mission\nControl",
-                 "icon": "mdi:view-dashboard",
-                 "action": {"type": "keys", "keys": "ctrl+up"}},
-                {"pos": [1, 3], "label": "Spotlight", "icon": "mdi:magnify",
-                 "action": {"type": "keys", "keys": "cmd+space"}},
-                {"pos": [2, 3], "label": "Blocca", "icon": "mdi:lock",
-                 "action": {"type": "keys", "keys": "ctrl+cmd+q"}},
             ],
         },
         {
@@ -122,6 +119,13 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                 {"pos": [2, 1], "label": "VLC",
                  "icon": "app:/Applications/VLC.app",
                  "action": {"type": "app", "target": "VLC"}},
+                {"pos": [0, 2], "label": "Mission\nControl",
+                 "icon": "mdi:view-dashboard",
+                 "action": {"type": "keys", "keys": "ctrl+up"}},
+                {"pos": [1, 2], "label": "Spotlight", "icon": "mdi:magnify",
+                 "action": {"type": "keys", "keys": "cmd+space"}},
+                {"pos": [2, 2], "label": "Blocca", "icon": "mdi:lock",
+                 "action": {"type": "keys", "keys": "ctrl+cmd+q"}},
             ],
         },
     ],
