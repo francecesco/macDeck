@@ -109,6 +109,17 @@ esphome run macdeck.yaml --device /dev/cu.usbmodem13301
 Il firmware di fabbrica è salvato in `backup/app0-factory.bin` prima di
 qualunque flash.
 
+### 4. App per il Mac (facoltativa)
+
+```bash
+cd mac-app && ./build.sh && cp -R MacDeck.app /Applications/
+```
+
+Apre l'editor in una finestra propria, riavvia l'agent se serve, e aggiunge
+due cose che dal browser non si possono fare: trascinare un'app dal Finder su
+uno slot, e registrare una scorciatoia premendola. La GUI web resta
+raggiungibile su `http://127.0.0.1:8765` esattamente come prima.
+
 ## Configurazione
 
 `~/.config/macdeck/layout.yaml`:
@@ -196,7 +207,7 @@ immagine) · `emoji:` (a colori) · `text:` (fino a 3 caratteri).
 ## Test
 
 ```bash
-cd agent && .venv/bin/python -m pytest        # 269 test, nessun hardware richiesto
+cd agent && .venv/bin/python -m pytest        # 284 test (1 skipped), nessun hardware richiesto
 ```
 
 Il 90% del sistema è testabile senza il display: `executor.py` è l'unico modulo
