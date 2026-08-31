@@ -7,10 +7,10 @@ from macdeck import layout as L
 def test_geometria_della_griglia_di_default():
     boxes = L.slot_boxes(L.DEFAULT_GRID)
     assert len(boxes) == 9
-    assert boxes[0] == {"x": 4, "y": 4, "w": 154, "h": 98}
+    assert boxes[0] == {"x": 5, "y": 4, "w": 154, "h": 101}
     last = boxes[max(boxes)]
     assert last["x"] + last["w"] <= L.DISPLAY_W
-    assert last["y"] + last["h"] <= L.DISPLAY_H - L.BOTTOM_MARGIN
+    assert last["y"] + last["h"] <= L.USABLE_H
 
 
 def test_meno_righe_danno_tile_piu_alte():
@@ -63,11 +63,33 @@ def test_la_geometria_non_dipende_dal_numero_di_pagine():
     possibile per una data griglia e non prende parametri oltre a quella.
     """
     boxes = L.slot_boxes(L.DEFAULT_GRID)
-    assert boxes[0]["h"] == 98
+    assert boxes[0]["h"] == 101
     with pytest.raises(TypeError):
         L.slot_boxes(L.DEFAULT_GRID, navbar=True)
-    # e l'ultima riga non tocca il bordo inferiore
-    assert boxes[8]["y"] + boxes[8]["h"] <= L.DISPLAY_H - 8
+
+
+@pytest.mark.parametrize("grid", [
+    {"cols": 3, "rows": 3},
+    {"cols": 3, "rows": 2},
+    {"cols": 4, "rows": 3},
+    {"cols": 2, "rows": 2},
+])
+def test_i_margini_intorno_alla_griglia_sono_uguali(grid):
+    """L'avanzo della divisione si divide fra i due bordi, non si accumula.
+
+    Prima l'origine era fissa a 4 e tutti i pixel che l'intero non copriva
+    finivano in fondo e a destra: sulla 3x3 il margine destro era 6 contro 4
+    a sinistra, e in basso restava una fascia vuota molto piu' larga degli
+    spazi fra le tile, che si notava.
+    """
+    boxes = L.slot_boxes(grid)
+    primo, ultimo = boxes[0], boxes[max(boxes)]
+    sinistra, destra = primo["x"], L.DISPLAY_W - (ultimo["x"] + ultimo["w"])
+    sopra, sotto = primo["y"] - L.HEADER_H, L.USABLE_H - (ultimo["y"] + ultimo["h"])
+    assert abs(sinistra - destra) <= 1
+    assert abs(sopra - sotto) <= 1
+    # e nessun margine e' piu' stretto dello spazio fra due tile
+    assert min(sinistra, destra, sopra, sotto) >= L.GUTTER
 
 
 def test_due_slot_sulla_stessa_casella_se_almeno_uno_ha_when():

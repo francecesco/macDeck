@@ -147,7 +147,7 @@ def test_tile_restituisce_un_png_della_dimensione_giusta(ctx):
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (154, 98)
+        assert im.size == (154, 101)
 
 
 def test_tile_di_uno_slot_vuoto(ctx):
@@ -314,7 +314,7 @@ def test_tile_preview_rende_una_tile_non_salvata(ctx, tmp_path):
     })
     assert r.status_code == 200
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (154, 98)
+        assert im.size == (154, 101)
     assert store.version == prima          # l'anteprima non salva nulla
 
 
@@ -325,7 +325,7 @@ def test_tile_preview_rispetta_la_griglia_richiesta(ctx):
         "slot": {"pos": [0, 0], "label": "Grande", "icon": "text:G"},
     })
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (234, 149)
+        assert im.size == (234, 154)
 
 
 def test_tile_preview_rifiuta_una_griglia_impossibile(ctx):
@@ -553,7 +553,7 @@ def test_le_tile_sono_alte_uguale_con_una_pagina_o_con_due(ctx):
     probe.refresh()
     una = client.get("/layout", headers=AUTH).json()
     assert "nav" not in una
-    assert una["slots"][0]["h"] == 98
+    assert una["slots"][0]["h"] == 101
 
     store.save({"grid": {"cols": 3, "rows": 3}, "pages": [
         {"name": "Uno", "slots": [{"pos": [0, 0], "label": "A", "icon": "text:A",
@@ -563,7 +563,7 @@ def test_le_tile_sono_alte_uguale_con_una_pagina_o_con_due(ctx):
     probe.refresh()
     due = client.get("/layout", headers=AUTH).json()
     assert "nav" not in due
-    assert due["slots"][0]["h"] == 98
+    assert due["slots"][0]["h"] == 101
 
 
 def test_l_elenco_app_non_viene_troncato(ctx):

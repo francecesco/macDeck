@@ -305,7 +305,7 @@ La terza è la **barra in fondo** con le frecce e il numero di pagina: altri
 cambia pagina strisciando il dito.
 
 Risultato cumulativo sulla griglia 3×3: tile da 115×80 (4×3 con fascia e
-barra) a **154×98**, icone circa il 46% più grandi.
+barra) a **154×101**, icone circa il 49% più grandi.
 
 ### Lo swipe deve annullare il tocco che sta sotto
 
@@ -382,12 +382,21 @@ batteria: non c'è niente da risparmiare. `on_idle` è stato rimosso. La
 retroilluminazione resta un'entità controllabile, quindi si può sempre
 spegnere a comando.
 
-### L'ultima riga non deve toccare il bordo
+### L'avanzo della divisione va diviso fra i due bordi
 
-Presa tutta l'altezza, la griglia arrivava a y=315 su un pannello di 320, e su
-questo esemplare gli ultimi pixel non si vedono: le icone in basso sembravano
-tagliate. `BOTTOM_MARGIN = 10` tiene la riga di sotto lontana dal bordo: tile
-da 101 a 98, ultima riga che finisce a 306.
+Con l'origine fissa a `GUTTER` tutti i pixel che la divisione intera non copre
+si accumulano in fondo e a destra. Sulla 3×3 il margine destro era 6 contro 4 a
+sinistra — impercettibile — ma in basso, tolta la barra di navigazione, restava
+una fascia vuota di 14 px contro i 4 fra una tile e l'altra: si notava, e
+sembrava che l'ultima riga fosse tagliata via.
+
+`slot_boxes` centra la griglia su entrambi gli assi: margini 5/5 ai lati e 4/5
+sopra e sotto, tutti dell'ordine dello spazio fra le tile.
+
+`USABLE_H` esiste per il caso opposto. Il pannello è 320 nominali ma gli ultimi
+pixel in fondo di questo esemplare stanno sotto la cornice, e un primo tentativo
+con l'ultima riga a y=315 era sembrato tagliato. È **l'unico numero da girare**
+se ricapita: la griglia si ricentra da sola.
 
 ### Il componente `http_request` ne regge una alla volta
 

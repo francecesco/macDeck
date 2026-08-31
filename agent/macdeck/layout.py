@@ -35,10 +35,11 @@ DISPLAY_H = 320
 # occupa spazio solo quando c'e' qualcosa che non va.
 HEADER_H = 0
 GUTTER = 4
-# Margine di sicurezza in fondo. Senza, l'ultima riga arriva a y=315 su un
-# pannello di 320 ed e' a filo del bordo: su questo esemplare gli ultimi
-# pixel non si vedono e le icone sembrano tagliate.
-BOTTOM_MARGIN = 10
+# Quanta altezza il pannello mostra DAVVERO. Nominalmente 320, ma su questo
+# esemplare gli ultimi pixel in fondo stanno sotto la cornice: se l'ultima
+# riga di icone risulta tagliata si abbassa questo numero e basta, la
+# griglia si ricentra da sola.
+USABLE_H = DISPLAY_H
 MAX_SLOTS = 12
 
 DEFAULT_GRID: dict[str, int] = {"cols": 3, "rows": 3}
@@ -115,20 +116,27 @@ class LayoutError(ValueError):
 def slot_boxes(grid: dict) -> dict[int, dict]:
     """Indice dello slot -> rettangolo in pixel sul display.
 
-    Le tile prendono tutta l'altezza: si cambia pagina con lo swipe, quindi
+    Le tile prendono tutto lo schermo: si cambia pagina con lo swipe, quindi
     non c'e' nessuna barra da riservare in fondo e il risultato dipende solo
     dalla griglia.
+
+    L'avanzo della divisione intera si divide fra i due bordi invece di
+    accumularsi in fondo e a destra. Con l'origine fissa a GUTTER la 3x3
+    lasciava 4 px a sinistra e 6 a destra, e in basso una fascia vuota molto
+    piu' larga degli spazi fra le tile: si notava, e sembrava che mancasse
+    qualcosa.
     """
     cols, rows = int(grid["cols"]), int(grid["rows"])
-    area_h = DISPLAY_H - HEADER_H - BOTTOM_MARGIN
     w = (DISPLAY_W - (cols + 1) * GUTTER) // cols
-    h = (area_h - (rows + 1) * GUTTER) // rows
+    h = (USABLE_H - HEADER_H - (rows + 1) * GUTTER) // rows
+    x0 = (DISPLAY_W - (cols * w + (cols - 1) * GUTTER)) // 2
+    y0 = HEADER_H + (USABLE_H - HEADER_H - (rows * h + (rows - 1) * GUTTER)) // 2
     boxes = {}
     for row in range(rows):
         for col in range(cols):
             boxes[row * cols + col] = {
-                "x": GUTTER + col * (w + GUTTER),
-                "y": HEADER_H + GUTTER + row * (h + GUTTER),
+                "x": x0 + col * (w + GUTTER),
+                "y": y0 + row * (h + GUTTER),
                 "w": w,
                 "h": h,
             }

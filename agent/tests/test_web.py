@@ -29,7 +29,7 @@ def test_la_geometria_nella_gui_combacia_con_quella_del_server():
     assert f"DW={L.DISPLAY_W}" in HTML
     assert f"DH={L.DISPLAY_H}" in HTML
     assert f"HEADER={L.HEADER_H}" in HTML
-    assert f"BOTTOM={L.BOTTOM_MARGIN}" in HTML
+    assert f"USABLE={L.USABLE_H}" in HTML
     assert f"GUT={L.GUTTER}" in HTML
     assert f"MAX_SLOTS={L.MAX_SLOTS}" in HTML
 
