@@ -452,6 +452,11 @@ function refreshTile(){
 
 function renderFields(host, action){
   host.innerHTML='';
+  // Il pannello viene ridisegnato per intero a ogni render(): se qui non si
+  // azzera, un riferimento sopravvissuto a un campo di uno slot precedente
+  // scriverebbe nell'action di UN ALTRO slot, senza che nulla in schermo lo
+  // faccia sospettare. Si riafferma sotto solo se il campo tasti c'e' davvero.
+  campoScorciatoia=null;
   const spec=ACTION_FIELDS[action.type];
   if(spec===undefined){
     host.innerHTML='<div class="hint">Tipo sconosciuto a questa GUI: i campi '+
@@ -743,7 +748,13 @@ if (ponte) {
   // Il guscio ha ascoltato i tasti veri e li ha gia' fatti tradurre
   // dall'agent; qui restano solo da scrivere nel campo visibile.
   ponte.onScorciatoia = ({keys}) => {
-    if (!campoScorciatoia) return;
+    // Il foglio nativo e' modale, quindi qui la vecchia guardia bastava di
+    // fatto — ma solo perche' beginSheet blocca i click che rifarebbero il
+    // pannello. E' una garanzia del sistema, non del JS: se un domani il
+    // registratore diventasse un popover non modale, un riferimento rimasto
+    // vivo scriverebbe nell'action di un altro slot senza errori visibili.
+    // Si controlla percio' che il nodo sia ancora nel documento.
+    if (!campoScorciatoia || !document.body.contains(campoScorciatoia)) return;
     campoScorciatoia.value = keys;
     campoScorciatoia.dispatchEvent(new Event('input'));   // come se l'avessi scritta
   };
