@@ -5,9 +5,10 @@ import MacDeckCore
 let indirizzoAgent = URL(string: "http://127.0.0.1:8765/")!
 
 @MainActor
-final class Finestra: NSObject, NSApplicationDelegate {
+final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var finestra: NSWindow!
     var vistaWeb: WKWebView!
+    var pollingSalute: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         finestra = NSWindow(
@@ -17,6 +18,7 @@ final class Finestra: NSObject, NSApplicationDelegate {
         finestra.title = "MacDeck"
         finestra.center()
         finestra.setFrameAutosaveName("MacDeckFinestra")
+        finestra.delegate = self
 
         vistaWeb = WKWebView(frame: .zero)
         vistaWeb.autoresizingMask = [.width, .height]
@@ -60,6 +62,7 @@ final class Finestra: NSObject, NSApplicationDelegate {
         barra.translatesAutoresizingMaskIntoConstraints = false
         vistaWeb.translatesAutoresizingMaskIntoConstraints = false
         let pila = NSView(frame: finestra.contentLayoutRect)
+        pila.autoresizingMask = [.width, .height]
         pila.addSubview(vistaWeb)
         pila.addSubview(barra)
         NSLayoutConstraint.activate([
@@ -75,12 +78,17 @@ final class Finestra: NSObject, NSApplicationDelegate {
         finestra.contentView = pila
         vistaWeb.load(URLRequest(url: indirizzoAgent))
 
-        Task { @MainActor in
+        pollingSalute = Task { @MainActor in
             while !Task.isCancelled {
                 barra.aggiorna(await Rete.salute(indirizzoAgent))
                 try? await Task.sleep(for: .seconds(5))
             }
         }
+    }
+
+    /// Chiusa la finestra, il polling non ha piu' senso: lo si ferma qui.
+    func windowWillClose(_ notification: Notification) {
+        pollingSalute?.cancel()
     }
 
     @MainActor func mostraErrore(titolo: String, corpo: String) {
