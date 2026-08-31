@@ -24,7 +24,7 @@ import yaml
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from . import actions, icons, render
+from . import actions, icons, keymap, render
 from . import layout as L
 from .executor import Executor
 from .layout import LayoutStore
@@ -343,6 +343,24 @@ def create_app(
             content=render.tile_png(slot, theme, root=root),
             media_type="image/png",
         )
+
+    @app.post("/api/keys-canon", dependencies=[Depends(require_local)])
+    def keys_canon(body: dict) -> dict:
+        """Da un evento di tastiera alla combinazione canonica.
+
+        Il registratore nativo manda il fatto grezzo — key code e
+        modificatori — e la traduzione avviene qui, accanto alla tabella.
+        L'app non impara i nomi dei tasti.
+        """
+        try:
+            combo = keymap.from_event(
+                int(body.get("keyCode", -1)),
+                body.get("modifiers") or [],
+                body.get("chars") or "",
+            )
+        except (keymap.InvalidKeys, TypeError, ValueError) as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        return {"keys": combo}
 
     @app.get("/api/icon-preview", dependencies=[Depends(require_local)])
     def icon_preview(spec: str, size: int = 64) -> Response:

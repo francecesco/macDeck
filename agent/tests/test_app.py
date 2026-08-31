@@ -554,3 +554,26 @@ def test_il_ridisegno_svuota_la_cache_delle_tile(ctx):
 
 def test_il_ridisegno_e_solo_locale(ctx):
     assert ctx[0].post("/api/refresh").status_code == 403
+
+
+def test_keys_canon_traduce_un_evento_vero(ctx):
+    client, *_ = ctx
+    r = client.post("/api/keys-canon", headers=LOCAL,
+                    json={"keyCode": 118, "modifiers": ["cmd", "shift"]})
+    assert r.status_code == 200
+    assert r.json() == {"keys": "cmd+shift+f4"}
+
+
+def test_keys_canon_accetta_un_tasto_stampabile(ctx):
+    client, *_ = ctx
+    r = client.post("/api/keys-canon", headers=LOCAL,
+                    json={"keyCode": 21, "modifiers": ["cmd"], "chars": "4"})
+    assert r.json() == {"keys": "cmd+4"}
+
+
+def test_keys_canon_rifiuta_un_evento_che_non_sa_tradurre(ctx):
+    client, *_ = ctx
+    # 422 e non 500: e' un ingresso sbagliato, non un guasto del server
+    r = client.post("/api/keys-canon", headers=LOCAL,
+                    json={"keyCode": 9999, "modifiers": []})
+    assert r.status_code == 422
