@@ -37,6 +37,11 @@ final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate,
         finestra.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
+        // Senza questo la finestra resta bianca fino a dieci secondi mentre
+        // l'avvio verifica se l'agent risponde: un piccolo placeholder scuro
+        // e' meglio di un flash bianco che sembra un guasto.
+        vistaWeb.loadHTMLString(Self.paginaDiAvvio, baseURL: nil)
+
         Task.detached {
             let avvio = Avvio(
                 agentRisponde: { await Rete.risponde(indirizzoAgent) },
@@ -146,4 +151,16 @@ final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate,
             break                      // un comando ignoto non e' un guasto
         }
     }
+
+    /// Placeholder scuro mostrato mentre l'avvio verifica se l'agent
+    /// risponde: sfondo coerente con l'editor, cosi' non fa un lampo bianco.
+    private static let paginaDiAvvio = """
+    <!doctype html>
+    <html><head><meta charset="utf-8"><style>
+      html, body { height: 100%; margin: 0; background: #1e1e1e;
+                   display: flex; align-items: center; justify-content: center; }
+      p { color: #999; font: 13px -apple-system, sans-serif; }
+    </style></head>
+    <body><p>avvio l'agent...</p></body></html>
+    """
 }
