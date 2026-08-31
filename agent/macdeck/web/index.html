@@ -152,6 +152,10 @@ let sel={page:0, index:null}, dirty=false, dragFrom=null;
 // Punta all'input dei tasti mostrato ora, cosi' onScorciatoia sa dove
 // scrivere: il campo viene ricreato a ogni render, non ha un id fisso.
 let campoScorciatoia=null;
+// Dentro l'app nativa il guscio inietta l'oggetto macdeck su window; ponte
+// ne e' l'alias. Dal browser vale undefined e questo blocco non gira: un
+// solo index.html, due contesti.
+const ponte = window.macdeck;
 
 const ACTION_FIELDS = {
   app:        [{k:'target', l:'App', pickApp:true}],
@@ -707,10 +711,6 @@ document.getElementById('save').onclick=async()=>{
 document.getElementById('reload').onclick=load;
 window.addEventListener('beforeunload',e=>{ if(dirty){e.preventDefault();e.returnValue='';} });
 
-// Dentro l'app nativa il guscio inietta l'oggetto macdeck su window; ponte
-// ne e' l'alias. Dal browser vale undefined e questo blocco non gira: un
-// solo index.html, due contesti.
-const ponte = window.macdeck;
 if (ponte) {
   document.body.classList.add('nativo');
 
