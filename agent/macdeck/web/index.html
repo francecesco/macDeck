@@ -283,6 +283,7 @@ async function render(){
     const b=boxes[i], s=slotAt(p,i);
     const el=document.createElement('div');
     el.className='slot'+(s?'':' empty')+(sel.index===i?' sel':'');
+    el.dataset.slot = i;          // serve al drop nativo per sapere dove sei
     el.style.cssText=`left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
     el.draggable=!!s;
     el.onclick=()=>{ sel.index=i; render(); };
@@ -678,6 +679,14 @@ document.getElementById('save').onclick=async()=>{
 };
 document.getElementById('reload').onclick=load;
 window.addEventListener('beforeunload',e=>{ if(dirty){e.preventDefault();e.returnValue='';} });
+
+// Dentro l'app nativa il guscio inietta l'oggetto macdeck su window; ponte
+// ne e' l'alias. Dal browser vale undefined e questo blocco non gira: un
+// solo index.html, due contesti.
+const ponte = window.macdeck;
+if (ponte) {
+  document.body.classList.add('nativo');
+}
 
 load();
 </script>

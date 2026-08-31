@@ -34,6 +34,17 @@ def test_la_geometria_nella_gui_combacia_con_quella_del_server():
     assert f"MAX_SLOTS={L.MAX_SLOTS}" in HTML
 
 
+def test_la_pagina_prevede_l_app_nativa():
+    assert "window.macdeck" in HTML
+
+
+def test_la_pagina_tocca_window_macdeck_una_volta_sola():
+    # Dal browser window.macdeck non esiste. Un solo accesso, nella guardia,
+    # e dentro si usa l'alias: cosi' la regola si verifica contando, invece
+    # di sperare che ogni riga si porti dietro la propria guardia.
+    assert HTML.count("window.macdeck") == 1
+
+
 @pytest.fixture
 def client(tmp_path, fake_ex):
     store = L.LayoutStore(tmp_path / "layout.yaml")

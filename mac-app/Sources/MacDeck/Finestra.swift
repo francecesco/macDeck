@@ -5,7 +5,8 @@ import MacDeckCore
 let indirizzoAgent = URL(string: "http://127.0.0.1:8765/")!
 
 @MainActor
-final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate,
+                       WKScriptMessageHandler {
     var finestra: NSWindow!
     var vistaWeb: WKWebView!
     var pollingSalute: Task<Void, Never>?
@@ -20,7 +21,10 @@ final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate {
         finestra.setFrameAutosaveName("MacDeckFinestra")
         finestra.delegate = self
 
-        vistaWeb = WKWebView(frame: .zero)
+        let conf = WKWebViewConfiguration()
+        conf.userContentController.addUserScript(Ponte.userScript())
+        conf.userContentController.add(self, name: "macdeck")
+        vistaWeb = WKWebView(frame: .zero, configuration: conf)
         vistaWeb.autoresizingMask = [.width, .height]
         finestra.contentView = vistaWeb
 
@@ -115,6 +119,18 @@ final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate {
         contenitore.addSubview(t)
         contenitore.addSubview(scorrevole)
         finestra.contentView = contenitore
+    }
+
+    func userContentController(_ c: WKUserContentController,
+                               didReceive m: WKScriptMessage) {
+        guard let corpo = m.body as? [String: Any],
+              let cmd = corpo["cmd"] as? String else { return }
+        switch cmd {
+        case "registraScorciatoia":
+            break                      // Task 9
+        default:
+            break                      // un comando ignoto non e' un guasto
+        }
     }
 }
 
