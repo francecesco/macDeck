@@ -1,6 +1,6 @@
 import Foundation
 
-/// Cosa l'app sa dello stato di sotto. Riempito davvero nel Task 6.
+/// Cosa l'app sa dello stato di sotto.
 public struct Salute: Equatable, Sendable {
     public let deck: String?
     public let announced: String?
