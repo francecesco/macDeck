@@ -1,6 +1,6 @@
 import pytest
 
-from macdeck.keymap import InvalidKeys, to_applescript
+from macdeck.keymap import InvalidKeys, to_applescript, from_event, KEY_CODES
 
 
 def test_carattere_semplice_con_un_modificatore():
@@ -53,3 +53,45 @@ def test_le_virgolette_nel_tasto_sono_escapate():
 def test_combinazioni_invalide_sollevano(combo):
     with pytest.raises(InvalidKeys):
         to_applescript(combo)
+
+
+def test_un_tasto_funzione_con_modificatori():
+    # f4 e' il key code 118, gli stessi che NSEvent consegna
+    assert from_event(118, ["cmd", "shift"]) == "cmd+shift+f4"
+
+
+def test_l_ordine_dei_modificatori_e_canonico():
+    # in ingresso disordinati, in uscita sempre cmd, ctrl, opt, shift
+    assert from_event(118, ["shift", "opt", "ctrl", "cmd"]) == \
+        "cmd+ctrl+opt+shift+f4"
+
+
+def test_i_nomi_lunghi_diventano_quelli_corti():
+    assert from_event(118, ["command", "option"]) == "cmd+opt+f4"
+
+
+def test_un_tasto_stampabile_arriva_dai_caratteri():
+    # "4" non sta in KEY_CODES: il codice da solo non basta
+    assert from_event(21, ["cmd"], chars="4") == "cmd+4"
+
+
+def test_senza_modificatori():
+    assert from_event(53) == "escape"
+
+
+def test_un_tasto_ignoto_e_un_errore_non_una_stringa_strana():
+    with pytest.raises(InvalidKeys):
+        from_event(9999, ["cmd"])
+
+
+def test_un_modificatore_ignoto_e_un_errore():
+    with pytest.raises(InvalidKeys):
+        from_event(118, ["hyper"])
+
+
+def test_quello_che_esce_da_from_event_rientra_in_to_applescript():
+    # la proprieta' che conta: il rovescio produce solo combinazioni che il
+    # dritto sa leggere. Se un giorno le due tabelle divergono, questo casca.
+    for codice in KEY_CODES.values():
+        combo = from_event(codice, ["cmd", "shift"])
+        to_applescript(combo)      # non deve sollevare
