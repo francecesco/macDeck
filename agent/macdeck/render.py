@@ -151,12 +151,9 @@ def render_screen(
     page: dict,
     theme: dict,
     *,
-    page_index: int = 0,
-    page_count: int = 1,
-    navbar: bool = True,
     root: Path | None = None,
 ) -> Image.Image:
-    """Compone l'INTERA schermata: sfondo, tile e navbar.
+    """Compone l'INTERA schermata: sfondo e tile.
 
     Il firmware scarica questa e basta. Dodici immagini separate erano la
     causa di due problemi distinti sul dispositivo — esaurimento dei socket
@@ -174,23 +171,6 @@ def render_screen(
         box = slot["box"]
         im.paste(render_tile(slot, theme, root=root), (box["x"], box["y"]))
 
-    if not navbar:
-        # Con una pagina sola non c'e' niente fra cui navigare, e i 28 px
-        # della barra sono gia' stati dati alle tile da slot_boxes().
-        return im
-
-    d = ImageDraw.Draw(im)
-    nav_y = L.DISPLAY_H - L.NAVBAR_H
-    font = resolve_font(theme.get("font", "SFNS"), 13)
-    d.rectangle([(0, nav_y), (L.DISPLAY_W, L.DISPLAY_H)], fill=theme["background"])
-    for x0, glyph in ((4, "‹"), (L.DISPLAY_W - 64, "›")):
-        d.rounded_rectangle([(x0, nav_y + 2), (x0 + 60, L.DISPLAY_H - 3)],
-                            radius=6, fill=theme["tile"])
-        d.text((x0 + 30, nav_y + 6), glyph, font=font, fill=theme["text"],
-               anchor="ma")
-    d.text((L.DISPLAY_W / 2, nav_y + 6),
-           f"{page['name']}   {page_index + 1}/{page_count}",
-           font=font, fill="#9AA3B2", anchor="ma")
     return im
 
 

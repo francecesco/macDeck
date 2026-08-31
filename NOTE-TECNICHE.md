@@ -115,7 +115,7 @@ basta: serve ri-assegnare `src` con `lvgl.image.update`.
 La correzione non è alzare `CONFIG_LWIP_MAX_SOCKETS` e aggiungere dodici
 `lvgl.image.update`. È **una sola immagine a schermo intero**, renderizzata dal
 Mac, con sopra dodici `obj` trasparenti che raccolgono i tocchi: un socket, un
-refresh, e in più il Mac guadagna il controllo di ogni pixel, navbar inclusa.
+refresh, e in più il Mac guadagna il controllo di ogni pixel.
 
 Le aree di tocco trasparenti hanno un secondo uso: il bordo di accento per la
 chiave di `state` è l'unica cosa che disegnano.
@@ -300,24 +300,40 @@ normalmente nascosta**, che occupa spazio solo quando c'è qualcosa da dire.
 Deve essere LVGL e non un pixel dell'immagine, perché l'avviso "Mac non
 raggiungibile" serve esattamente quando il Mac non può più disegnare nulla.
 
+La terza è la **barra in fondo** con le frecce e il numero di pagina: altri
+28 px permanenti per due bottoni che si usano di rado, e brutta da vedere. Si
+cambia pagina strisciando il dito.
+
 Risultato cumulativo sulla griglia 3×3: tile da 115×80 (4×3 con fascia e
-barra) a **154×101**, icone circa il 49% più grandi.
+barra) a **154×98**, icone circa il 46% più grandi.
+
+### Lo swipe deve annullare il tocco che sta sotto
+
+LVGL manda `LV_EVENT_GESTURE` mentre il dito è ancora giù, e al rilascio manda
+**comunque** `LV_EVENT_CLICKED` all'oggetto sotto (`indev_proc_release` non
+guarda `gesture_sent`). Le aree di tocco coprono quasi tutto lo schermo, quindi
+senza contromisure ogni strisciata lancerebbe anche l'azione della tile da cui
+è partita: 60 px di movimento dentro una tile larga 154 finiscono ancora dentro
+quella tile.
+
+`lv_indev_wait_release(lv_indev_active())` nel gestore del gesto azzera
+`act_obj`: il rilascio manda un `PRESS_LOST` — che spegne anche il velo bianco
+sotto il dito — e salta il `CLICKED`.
+
+Il gesto arriva alla pagina e non alla tile perché `LV_OBJ_FLAG_GESTURE_BUBBLE`
+è acceso di default su ogni oggetto con un genitore, e la pagina, essendo uno
+schermo, non ce l'ha: la risalita si ferma lì.
 
 ### La geometria non si può calcolare in validazione
 
-`slot_boxes` dipende da `navbar`, che dipende da quante pagine sono **visibili**,
+Il `box` di uno slot dipende da quali **pagine e quali slot sono visibili**,
 che dipende dallo stato vivo del Mac. Per questo `validate()` calcola solo
 `index` e il `box` si calcola al momento di servire la richiesta.
 
-Con una pagina sola la navbar sparisce e i suoi 28 px vanno alle tile: la
-griglia 3×3 passa da 154×80 a 154×89. Il firmware deve nascondere le due aree
-di tocco delle frecce quando `/layout` risponde `"nav": false`, altrimenti
-restano sopra la riga in basso e rubano i tocchi.
-
 ### La versione è l'impronta del risultato, non del file
 
-`_signature()` fa l'hash di **ciò che il display riceverebbe**: pagine visibili,
-slot risolti, flag della navbar. Così qualunque cosa cambi l'aspetto del deck
+`_signature()` fa l'hash di **ciò che il display riceverebbe**: pagine visibili
+e slot risolti. Così qualunque cosa cambi l'aspetto del deck
 cambia la versione, senza doverci pensare caso per caso — ed è la lezione dei
 tre bug di versione che l'hanno preceduta.
 
@@ -368,11 +384,10 @@ spegnere a comando.
 
 ### L'ultima riga non deve toccare il bordo
 
-Senza navbar la griglia arrivava a y=315 su un pannello di 320, e su questo
-esemplare gli ultimi pixel non si vedono: le icone in basso sembravano
-tagliate. `BOTTOM_MARGIN = 10` si applica **solo** quando la navbar non c'è,
-perché con la barra quella fa già da distanziatore. Tile da 101 a 98, ultima
-riga che finisce a 306.
+Presa tutta l'altezza, la griglia arrivava a y=315 su un pannello di 320, e su
+questo esemplare gli ultimi pixel non si vedono: le icone in basso sembravano
+tagliate. `BOTTOM_MARGIN = 10` tiene la riga di sotto lontana dal bordo: tile
+da 101 a 98, ultima riga che finisce a 306.
 
 ### Il componente `http_request` ne regge una alla volta
 

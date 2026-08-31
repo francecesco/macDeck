@@ -5,14 +5,12 @@ from macdeck import layout as L
 
 
 def test_geometria_della_griglia_di_default():
-    # navbar=True e' il default della funzione; il caso reale a pagina unica
-    # e' coperto da test_senza_navbar_le_tile_sono_piu_alte.
-    boxes = L.slot_boxes(L.DEFAULT_GRID, navbar=True)
+    boxes = L.slot_boxes(L.DEFAULT_GRID)
     assert len(boxes) == 9
-    assert boxes[0] == {"x": 4, "y": 4, "w": 154, "h": 92}
+    assert boxes[0] == {"x": 4, "y": 4, "w": 154, "h": 98}
     last = boxes[max(boxes)]
     assert last["x"] + last["w"] <= L.DISPLAY_W
-    assert last["y"] + last["h"] <= L.DISPLAY_H - L.NAVBAR_H
+    assert last["y"] + last["h"] <= L.DISPLAY_H - L.BOTTOM_MARGIN
 
 
 def test_meno_righe_danno_tile_piu_alte():
@@ -58,16 +56,18 @@ def test_validate_calcola_lindice_ma_non_la_geometria():
     assert "box" not in slot
 
 
-def test_senza_navbar_le_tile_sono_piu_alte():
-    """Con una pagina sola i 28 px della barra vanno alle tile."""
-    con = L.slot_boxes(L.DEFAULT_GRID, navbar=True)[0]
-    senza = L.slot_boxes(L.DEFAULT_GRID, navbar=False)[0]
-    assert senza["w"] == con["w"]
-    assert con["h"] == 92
-    assert senza["h"] == 98
+def test_la_geometria_non_dipende_dal_numero_di_pagine():
+    """Non c'e' piu' una barra da riservare: le tile prendono tutto.
+
+    Si cambia pagina con lo swipe, quindi slot_boxes ha un solo risultato
+    possibile per una data griglia e non prende parametri oltre a quella.
+    """
+    boxes = L.slot_boxes(L.DEFAULT_GRID)
+    assert boxes[0]["h"] == 98
+    with pytest.raises(TypeError):
+        L.slot_boxes(L.DEFAULT_GRID, navbar=True)
     # e l'ultima riga non tocca il bordo inferiore
-    ultima = L.slot_boxes(L.DEFAULT_GRID, navbar=False)[8]
-    assert ultima["y"] + ultima["h"] <= L.DISPLAY_H - 8
+    assert boxes[8]["y"] + boxes[8]["h"] <= L.DISPLAY_H - 8
 
 
 def test_due_slot_sulla_stessa_casella_se_almeno_uno_ha_when():

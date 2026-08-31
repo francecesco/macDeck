@@ -38,10 +38,6 @@ main{display:flex;gap:22px;padding:18px;align-items:flex-start;flex-wrap:wrap}
 #screen{position:relative;width:480px;height:320px;border-radius:14px;
         border:1px solid var(--line);overflow:hidden;flex:none;
         box-shadow:0 8px 30px #0008}
-#screen .chrome{position:absolute;left:0;right:0;color:var(--dim);font-size:11px;
-                display:flex;align-items:center;padding:0 8px;gap:8px}
-#screen .hdr{top:0;height:36px;border-bottom:1px solid #0006}
-#screen .nav{bottom:0;height:28px;justify-content:center;border-top:1px solid #0006}
 .slot{position:absolute;border-radius:10px;overflow:hidden;cursor:pointer;
       border:2px solid transparent}
 .slot img{display:block;width:100%;height:100%}
@@ -127,15 +123,11 @@ textarea{min-height:76px;font-family:ui-monospace,Menlo,monospace;font-size:12.5
 // Replica del calcolo di layout.py. Il pannello e' 320x480, ma LVGL lo ruota
 // via software (rotation: 90) e ruota anche il touch: lo spazio utile e'
 // 480x320 landscape, ed e' in quello che si ragiona qui.
-const DW=480, DH=320, HEADER=0, NAVBAR=28, GUT=4, BOTTOM=10, MAX_SLOTS=12;
+const DW=480, DH=320, HEADER=0, GUT=4, BOTTOM=10, MAX_SLOTS=12;
 
-// La navbar esiste solo con piu' di una pagina: senza, i suoi 28 px vanno
-// alle tile. Stessa regola del server (layout.slot_boxes).
-function hasNav(){ return model && model.pages.length > 1; }
-
-function slotBoxes(grid, navbar){
+function slotBoxes(grid){
   const cols=grid.cols, rows=grid.rows;
-  const areaH = DH - HEADER - (navbar ? NAVBAR : BOTTOM);
+  const areaH = DH - HEADER - BOTTOM;
   const w = Math.floor((DW - (cols+1)*GUT)/cols);
   const h = Math.floor((areaH - (rows+1)*GUT)/rows);
   const out={};
@@ -266,7 +258,7 @@ async function checkAccess(){
 
 // ----------------------------------------------------------------- anteprima
 async function render(){
-  const p = curPage(), g = gridOf(p), boxes = slotBoxes(g, hasNav());
+  const p = curPage(), g = gridOf(p), boxes = slotBoxes(g);
   document.getElementById('gridInfo').textContent =
     `griglia ${g.cols}×${g.rows} — tile ${boxes[0].w}×${boxes[0].h} px`;
 
@@ -281,10 +273,7 @@ async function render(){
 
   const sc=document.getElementById('screen');
   sc.style.background = model.theme.background;
-  sc.innerHTML =
-    (hasNav()
-      ? `<div class="chrome nav">Pagina ${sel.page+1}/${model.pages.length}</div>`
-      : '');
+  sc.innerHTML = '';
 
   for(let i=0;i<g.cols*g.rows;i++){
     const b=boxes[i], s=slotAt(p,i);
@@ -329,7 +318,7 @@ async function tilePreview(slot,grid){
   try{
     const r=await fetch('/api/tile-preview',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({grid, slot, theme:model.theme, navbar:hasNav()})});
+      body:JSON.stringify({grid, slot, theme:model.theme})});
     if(!r.ok) return null;
     return URL.createObjectURL(await r.blob());
   }catch(e){ return null; }

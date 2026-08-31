@@ -142,14 +142,12 @@ def test_pagina_fuori_intervallo_viene_riportata_dentro(ctx):
 
 
 def test_tile_restituisce_un_png_della_dimensione_giusta(ctx):
-    # Il layout di prova ha due pagine, quindi la navbar c'e' e le tile sono
-    # alte 80. Con una pagina sola sarebbero 89.
     client, *_ = ctx
     r = client.get("/tile/0/0.png", headers=AUTH)
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
     with Image.open(io.BytesIO(r.content)) as im:
-        assert im.size == (154, 92)
+        assert im.size == (154, 98)
 
 
 def test_tile_di_uno_slot_vuoto(ctx):
@@ -543,27 +541,29 @@ def test_lo_scambio_della_casella_cambia_la_versione(ctx):
     assert a != b
 
 
-def test_una_pagina_sola_non_ha_navbar_e_le_tile_sono_piu_alte(ctx):
+def test_le_tile_sono_alte_uguale_con_una_pagina_o_con_due(ctx):
+    """La barra in fondo non c'e' piu': si cambia pagina con lo swipe.
+
+    Prima i suoi 28 px comparivano e sparivano a seconda di quante pagine
+    erano visibili, e le tile si alzavano e abbassavano sotto il dito.
+    """
     client, store, fake_ex, probe = ctx
     store.save(LAYOUT_RIGA_CONDIZIONALE)
     _con_player(fake_ex, False)
     probe.refresh()
-    body = client.get("/layout", headers=AUTH).json()
-    assert body["nav"] is False
-    assert body["slots"][0]["h"] == 98
+    una = client.get("/layout", headers=AUTH).json()
+    assert "nav" not in una
+    assert una["slots"][0]["h"] == 98
 
-
-def test_con_due_pagine_la_navbar_torna_e_le_tile_si_abbassano(ctx):
-    client, store, fake_ex, probe = ctx
     store.save({"grid": {"cols": 3, "rows": 3}, "pages": [
         {"name": "Uno", "slots": [{"pos": [0, 0], "label": "A", "icon": "text:A",
                                    "action": {"type": "noop"}}]},
         {"name": "Due", "slots": []},
     ]})
     probe.refresh()
-    body = client.get("/layout", headers=AUTH).json()
-    assert body["nav"] is True
-    assert body["slots"][0]["h"] == 92
+    due = client.get("/layout", headers=AUTH).json()
+    assert "nav" not in due
+    assert due["slots"][0]["h"] == 98
 
 
 def test_l_elenco_app_non_viene_troncato(ctx):

@@ -34,12 +34,10 @@ DISPLAY_H = 320
 # permesso Accessibilita' mancante — li disegna LVGL come sovrapposizione, che
 # occupa spazio solo quando c'e' qualcosa che non va.
 HEADER_H = 0
-NAVBAR_H = 28
 GUTTER = 4
-# Margine di sicurezza in fondo quando non c'e' la navbar. Senza, l'ultima
-# riga arriva a y=315 su un pannello di 320 ed e' a filo del bordo: su questo
-# esemplare gli ultimi pixel non si vedono e le icone sembrano tagliate.
-# Con la navbar non serve, perche' quella fa gia' da distanziatore.
+# Margine di sicurezza in fondo. Senza, l'ultima riga arriva a y=315 su un
+# pannello di 320 ed e' a filo del bordo: su questo esemplare gli ultimi
+# pixel non si vedono e le icone sembrano tagliate.
 BOTTOM_MARGIN = 10
 MAX_SLOTS = 12
 
@@ -114,16 +112,15 @@ class LayoutError(ValueError):
     pass
 
 
-def slot_boxes(grid: dict, *, navbar: bool = True) -> dict[int, dict]:
+def slot_boxes(grid: dict) -> dict[int, dict]:
     """Indice dello slot -> rettangolo in pixel sul display.
 
-    Con una pagina sola la navbar non serve, e i suoi 28 px vanno alle tile:
-    la griglia 3x3 passa da 154x80 a 154x89. Per questo il calcolo dipende da
-    quante pagine sono visibili, e quindi non puo' stare in validate(): si fa
-    al momento di servire la richiesta, quando la visibilita' e' nota.
+    Le tile prendono tutta l'altezza: si cambia pagina con lo swipe, quindi
+    non c'e' nessuna barra da riservare in fondo e il risultato dipende solo
+    dalla griglia.
     """
     cols, rows = int(grid["cols"]), int(grid["rows"])
-    area_h = DISPLAY_H - HEADER_H - (NAVBAR_H if navbar else BOTTOM_MARGIN)
+    area_h = DISPLAY_H - HEADER_H - BOTTOM_MARGIN
     w = (DISPLAY_W - (cols + 1) * GUTTER) // cols
     h = (area_h - (rows + 1) * GUTTER) // rows
     boxes = {}

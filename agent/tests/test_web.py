@@ -29,9 +29,16 @@ def test_la_geometria_nella_gui_combacia_con_quella_del_server():
     assert f"DW={L.DISPLAY_W}" in HTML
     assert f"DH={L.DISPLAY_H}" in HTML
     assert f"HEADER={L.HEADER_H}" in HTML
-    assert f"NAVBAR={L.NAVBAR_H}" in HTML
+    assert f"BOTTOM={L.BOTTOM_MARGIN}" in HTML
     assert f"GUT={L.GUTTER}" in HTML
     assert f"MAX_SLOTS={L.MAX_SLOTS}" in HTML
+
+
+def test_la_gui_non_disegna_piu_la_barra_di_navigazione():
+    # Sul deck si cambia pagina con lo swipe: se l'anteprima disegnasse
+    # ancora la barra, mostrerebbe uno schermo che non esiste.
+    assert "NAVBAR" not in HTML
+    assert "hasNav" not in HTML
 
 
 def test_la_pagina_prevede_l_app_nativa():

@@ -72,20 +72,17 @@ def create_app(
         - quali PAGINE sono visibili (`when:` sulla pagina);
         - quali SLOT occupano ciascuna casella (`when:` sullo slot): e' cosi'
           che la riga in basso diventa i comandi multimediali quando c'e' un
-          player attivo, e torna alle app quando non c'e';
-        - se serve la NAVBAR, che con una pagina sola sparisce e restituisce
-          i suoi 28 px alle tile.
+          player attivo, e torna alle app quando non c'e'.
         """
         stato = probe.snapshot()
         pagine = [
             p for p in store.layout["pages"]
             if not p.get("when") or bool(value_at(stato, p["when"]))
         ] or store.layout["pages"]
-        navbar = len(pagine) > 1
 
         risolte = []
         for pagina in pagine:
-            boxes = L.slot_boxes(pagina["grid"], navbar=navbar)
+            boxes = L.slot_boxes(pagina["grid"])
             scelti: dict[int, dict] = {}
             for slot in pagina["slots"]:
                 cond = slot.get("when")
@@ -97,7 +94,7 @@ def create_app(
                     continue      # a parita' di casella vince il condizionale
                 scelti[slot["index"]] = {**slot, "box": boxes[slot["index"]]}
             risolte.append({**pagina, "slots": [scelti[i] for i in sorted(scelti)]})
-        return risolte, navbar
+        return risolte
 
     # Le icone non stanno nel layout: vivono sul disco, dentro i bundle delle
     # app. Se cambia un'icona — o cambia il modo in cui la risolviamo — il
@@ -105,18 +102,18 @@ def create_app(
     # entra nella firma apposta per poterglielo dire.
     nudge = {"n": 0}
 
-    def _signature(risolte: list[dict], navbar: bool) -> int:
+    def _signature(risolte: list[dict]) -> int:
         """Versione = impronta di CIO' CHE IL DISPLAY RICEVEREBBE.
 
         Non del file, non dell'elenco delle pagine: del risultato risolto.
         Cosi' qualunque cosa cambi l'aspetto del deck — un layout salvato, una
-        pagina che compare, uno slot condizionale che si attiva, la navbar che
-        sparisce — cambia la versione, senza doverci pensare caso per caso.
+        pagina che compare, uno slot condizionale che si attiva — cambia la
+        versione, senza doverci pensare caso per caso.
 
         Niente hash() di Python: e' randomizzato per processo e la versione
         cambierebbe a ogni riavvio dell'agent a parita' di contenuto.
         """
-        payload = json.dumps([risolte, navbar, nudge["n"]],
+        payload = json.dumps([risolte, nudge["n"]],
                              sort_keys=True, ensure_ascii=False)
         return int(hashlib.sha256(payload.encode()).hexdigest()[:8], 16)
 
@@ -135,7 +132,7 @@ def create_app(
         return max(0, min(requested, len(risolte) - 1))
 
     def _slot(page_index: int, slot_index: int) -> dict:
-        risolte, _navbar = _resolve()
+        risolte = _resolve()
         page = risolte[_page_index(page_index, risolte)]
         for slot in page["slots"]:
             if slot["index"] == slot_index:
@@ -149,15 +146,14 @@ def create_app(
 
     @app.get("/layout", dependencies=[Depends(require_token)])
     def get_layout(page: int = 0) -> dict:
-        risolte, navbar = _resolve()
+        risolte = _resolve()
         page = _page_index(page, risolte)
         p = risolte[page]
         theme = store.layout["theme"]
-        version = _signature(risolte, navbar)
+        version = _signature(risolte)
         return {
             "version": version,
             # Con una pagina sola il firmware deve nascondere le frecce.
-            "nav": navbar,
             # Autoritativo: il display DEVE adottare questo valore, perche'
             # puo' differire da quello che ha chiesto.
             "page": page,
@@ -193,16 +189,14 @@ def create_app(
         E' cio' che il firmware scarica davvero: una richiesta invece di
         dodici. Vedi render.render_screen per il perche'.
         """
-        risolte, navbar = _resolve()
+        risolte = _resolve()
         page = _page_index(page, risolte)
         p = risolte[page]
-        key = (page, _signature(risolte, navbar))
+        key = (page, _signature(risolte))
         png = screens.get(key)
         if png is None:
             png = render.screen_png(
-                p, store.layout["theme"],
-                page_index=page, page_count=len(risolte),
-                navbar=navbar, root=root,
+                p, store.layout["theme"], root=root,
             )
             screens.clear()          # una sola versione per volta in memoria
             screens[key] = png
@@ -232,7 +226,7 @@ def create_app(
     def get_state() -> dict:
         return {
             **probe.snapshot(),
-            "layout_version": _signature(*_resolve()),
+            "layout_version": _signature(_resolve()),
             "layout_error": store.error,
         }
 
@@ -356,7 +350,7 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(e)) from e
         slot = dict(body.get("slot") or {})
         pos = slot.get("pos") or [0, 0]
-        boxes = L.slot_boxes(grid, navbar=bool(body.get("navbar", False)))
+        boxes = L.slot_boxes(grid)
         index = L.slot_index(pos, grid)
         slot["box"] = boxes.get(index) or next(iter(boxes.values()))
         theme = {**store.layout["theme"], **(body.get("theme") or {})}

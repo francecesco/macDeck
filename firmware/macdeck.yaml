@@ -289,11 +289,9 @@ script:
                     id(hit_8), id(hit_9), id(hit_10), id(hit_11)};
                   bool used[12] = {false};
                   std::string screen_url;
-                  bool nav = true;
                   json::parse_json(body, [&](JsonObject root) -> bool {
                     id(layout_version) = root["version"] | -1;
                     id(page_count) = root["pages"].size();
-                    nav = root["nav"] | true;
                     // Autoritativa: il server puo' aver riportato l'indice
                     // dentro l'intervallo se la pagina corrente e' sparita.
                     id(current_page) = root["page"] | 0;
@@ -314,12 +312,6 @@ script:
                       lv_obj_add_flag(hits[i], LV_OBJ_FLAG_HIDDEN);
                       id(state_keys)[i] = "";
                     }
-                  }
-                  // Con una pagina sola le frecce non servono, e i 28 px
-                  // della barra sono gia' stati dati alle tile dal Mac.
-                  for (lv_obj_t *b : {id(nav_prev), id(nav_next)}) {
-                    if (nav) lv_obj_clear_flag(b, LV_OBJ_FLAG_HIDDEN);
-                    else     lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
                   }
                   if (!screen_url.empty()) {
                     id(screen_img)->set_url(std::string("http://") + id(agent_host_txt).state + ":${agent_port}" + screen_url);
@@ -557,6 +549,23 @@ lvgl:
                 text_font: font_hdr
   pages:
     - id: deck_page
+      # Si cambia pagina strisciando il dito. Le frecce in fondo costavano
+      # 28 px permanenti, che ora sono delle tile.
+      #
+      # lv_indev_wait_release() e' la parte che conta: LVGL manda il gesto
+      # mentre il dito e' ancora giu' e poi, al rilascio, manda comunque un
+      # LV_EVENT_CLICKED all'oggetto sotto. Senza questa chiamata una
+      # strisciata che parte sopra una tile ne lancerebbe anche l'azione.
+      on_swipe_left:
+        - lambda: lv_indev_wait_release(lv_indev_active());
+        - script.execute:
+            id: change_page
+            delta: 1
+      on_swipe_right:
+        - lambda: lv_indev_wait_release(lv_indev_active());
+        - script.execute:
+            id: change_page
+            delta: -1
       widgets:
         # L'intera schermata, disegnata dal Mac.
         - image:
@@ -832,44 +841,3 @@ lvgl:
                 - script.execute:
                     id: press_slot
                     slot: 11
-        # Navigazione: trasparenti, la grafica la disegna il Mac nell'immagine.
-        - obj:
-            id: nav_prev
-            x: 4
-            y: 292
-            width: 60
-            height: 24
-            bg_opa: TRANSP
-            border_width: 0
-            pad_all: 0
-            clickable: true
-            pressed:
-              bg_opa: 25%
-              bg_color: 0xFFFFFF
-              border_width: 2
-              border_color: 0xFFFFFF
-            on_click:
-              then:
-                - script.execute:
-                    id: change_page
-                    delta: -1
-        - obj:
-            id: nav_next
-            x: 416
-            y: 292
-            width: 60
-            height: 24
-            bg_opa: TRANSP
-            border_width: 0
-            pad_all: 0
-            clickable: true
-            pressed:
-              bg_opa: 25%
-              bg_color: 0xFFFFFF
-              border_width: 2
-              border_color: 0xFFFFFF
-            on_click:
-              then:
-                - script.execute:
-                    id: change_page
-                    delta: 1
