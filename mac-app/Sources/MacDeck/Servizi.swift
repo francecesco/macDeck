@@ -65,9 +65,28 @@ enum Servizio {
     }
 
     /// Quando l'agent non parte, il motivo e' nel log. Una pagina bianca no.
+    ///
+    /// Il LaunchAgent (vedi `agent/macdeck/cli.py`) manda stdout su
+    /// `macdeck.log` e stderr su `macdeck.err`: un traceback Python finisce
+    /// sempre su stderr, mentre stdout raccoglie solo i banner d'avvio
+    /// riusciti. Leggere solo `.log` mostrerebbe le partenze buone e
+    /// nasconderebbe proprio il motivo del fallimento — per questo stderr
+    /// viene prima, ed entrambi i file sono letti anche se uno manca.
     static func codaDelLog() -> String {
-        let testo = (try? String(contentsOfFile: "/tmp/macdeck.log",
-                                 encoding: .utf8)) ?? "(log non leggibile)"
-        return testo.split(separator: "\n").suffix(30).joined(separator: "\n")
+        let file: [(percorso: String, etichetta: String)] = [
+            ("/tmp/macdeck.err", "macdeck.err"),
+            ("/tmp/macdeck.log", "macdeck.log"),
+        ]
+        let pezzi = file.map { percorso, etichetta -> String in
+            guard let testo = try? String(contentsOfFile: percorso,
+                                          encoding: .utf8),
+                  !testo.isEmpty
+            else { return "── \(etichetta) ──\n(vuoto o non leggibile)" }
+            let coda = testo.split(separator: "\n",
+                                   omittingEmptySubsequences: false)
+                .suffix(30).joined(separator: "\n")
+            return "── \(etichetta) ──\n\(coda)"
+        }
+        return pezzi.joined(separator: "\n\n")
     }
 }

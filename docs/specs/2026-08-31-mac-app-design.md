@@ -194,9 +194,12 @@ funzionare *senza dare errore*, che è il modo di rompersi contro cui questo
 progetto si è già dovuto difendere una volta (§6.2 del design principale).
 L'app riavvia il servizio che esiste, oppure dice perché non può.
 
-La schermata d'errore mostra **le ultime righe di `/tmp/macdeck.log`**. Quando
-l'agent non parte, il motivo è lì; una pagina bianca del `WKWebView` non aiuta
-nessuno.
+La schermata d'errore mostra **le ultime righe di `/tmp/macdeck.err` e di
+`/tmp/macdeck.log`**, stderr per primo: il LaunchAgent manda lì i traceback
+Python, mentre `.log` (stdout) raccoglie solo i banner degli avvii riusciti —
+mostrare solo quest'ultimo nasconderebbe proprio il motivo del fallimento.
+Quando l'agent non parte, il motivo è lì; una pagina bianca del `WKWebView`
+non aiuta nessuno.
 
 ### 4.2 La barra di salute
 
