@@ -196,7 +196,7 @@ immagine) · `emoji:` (a colori) · `text:` (fino a 3 caratteri).
 ## Test
 
 ```bash
-cd agent && .venv/bin/python -m pytest        # 150 test, nessun hardware richiesto
+cd agent && .venv/bin/python -m pytest        # 269 test, nessun hardware richiesto
 ```
 
 Il 90% del sistema è testabile senza il display: `executor.py` è l'unico modulo
@@ -259,6 +259,13 @@ macdeck pair --usb
 Serve un cavo **dati** (molti cavi da ricarica non hanno i fili per i dati).
 Il cavo serve solo per quel passaggio: subito dopo il deck torna in WiFi con
 la sola alimentazione.
+
+**Riflashare il firmware cancella le reti imparate cosi'.** Le credenziali che
+arrivano da `pair` finiscono in una zona di preferenze indicizzata dall'hash
+della configurazione: ricompilando, l'hash cambia e quelle vecchie diventano
+irraggiungibili. Il deck riparte conoscendo solo le reti di `secrets.yaml`, e
+se nessuna e' a portata resta muto senza dire perche'. Dopo ogni `esphome run`
+fuori casa, ripassagli la rete con `macdeck pair`: sono sette secondi.
 
 **Un caso in cui non funziona niente:** su molte reti pubbliche — alberghi,
 aeroporti — il router impedisce ai dispositivi collegati di parlarsi fra
