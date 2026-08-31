@@ -9,3 +9,6 @@ firmware/.esphome/
 
 # firmware di fabbrica: backup locale, non si ridistribuisce
 /backup/
+
+mac-app/.build/
+mac-app/MacDeck.app/
