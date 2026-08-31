@@ -120,6 +120,9 @@ due cose che dal browser non si possono fare: trascinare un'app dal Finder su
 uno slot, e registrare una scorciatoia premendola. La GUI web resta
 raggiungibile su `http://127.0.0.1:8765` esattamente come prima.
 
+L'icona è in `mac-app/Resources/MacDeck.icns`, già pronta. Per rifarla
+(serve Pillow): `agent/.venv/bin/python mac-app/icona.py`.
+
 ## Configurazione
 
 `~/.config/macdeck/layout.yaml`:

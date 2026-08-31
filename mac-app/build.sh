@@ -11,6 +11,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp "$(swift build -c release --show-bin-path)/MacDeck" "$APP/Contents/MacOS/MacDeck"
+cp Resources/MacDeck.icns "$APP/Contents/Resources/MacDeck.icns"
 
 codesign --force --sign - "$APP"
 echo "fatto: $(pwd)/$APP"
