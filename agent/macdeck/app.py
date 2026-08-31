@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -243,6 +244,26 @@ def create_app(
         if not page.exists():
             return HTMLResponse("<h1>MacDeck</h1><p>web UI non installata</p>")
         return HTMLResponse(page.read_text())
+
+    @app.get("/api/health", dependencies=[Depends(require_local)])
+    def health(request: Request) -> dict:
+        """Cosa l'app nativa deve poter dire quando la pagina non puo'.
+
+        Nessuna ricerca del deck qui dentro: si riporta solo quello che
+        l'Announcer ha gia' trovato per conto suo. Una seconda opinione
+        sulla presenza del deck sarebbe peggio di nessuna.
+        """
+        ann = getattr(request.app.state, "announcer", None)
+        s = ann.status() if ann is not None else None
+        giro = (s or {}).get("ultimo_giro") or 0.0
+        return {
+            "deck": (s or {}).get("deck"),
+            "announced": (s or {}).get("annunciato"),
+            "error": (s or {}).get("ultimo_errore"),
+            # secondi dall'ultimo giro, None se non ne ha ancora fatti
+            "last_round": (time.time() - giro) if giro else None,
+            "accessibility_ok": probe.snapshot().get("accessibility_ok"),
+        }
 
     @app.get("/api/config", dependencies=[Depends(require_local)])
     def read_config() -> dict:

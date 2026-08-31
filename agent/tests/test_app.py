@@ -1,4 +1,5 @@
 import io
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -46,6 +47,63 @@ def ctx(tmp_path, fake_ex):
         trust_loopback_header=True,
     )
     return TestClient(app), store, fake_ex, probe
+
+
+class _AnnouncerFinto:
+    def __init__(self, stato):
+        self._stato = stato
+
+    def status(self):
+        return self._stato
+
+
+@pytest.fixture
+def client_con_announcer(ctx):
+    client, *_ = ctx
+    client.app.state.announcer = _AnnouncerFinto({
+        "deck": "192.168.0.174",
+        "annunciato": "192.168.0.165",
+        "ultimo_errore": None,
+        "ultimo_giro": time.time(),
+    })
+    return client
+
+
+@pytest.fixture
+def client_con_announcer_fermo(ctx):
+    client, *_ = ctx
+    client.app.state.announcer = _AnnouncerFinto({
+        "deck": None, "annunciato": None,
+        "ultimo_errore": None, "ultimo_giro": 0.0,
+    })
+    return client
+
+
+def test_health_senza_announcer_non_esplode(ctx):
+    # create_app nei test non ha un announcer attaccato: l'endpoint deve
+    # ammettere di non sapere, non sollevare
+    client, *_ = ctx
+    r = client.get("/api/health", headers=LOCAL)
+    assert r.status_code == 200
+    corpo = r.json()
+    assert corpo["deck"] is None
+    assert corpo["last_round"] is None
+
+
+def test_health_riporta_quello_che_l_announcer_sa(client_con_announcer):
+    r = client_con_announcer.get("/api/health", headers=LOCAL)
+    corpo = r.json()
+    assert corpo["deck"] == "192.168.0.174"
+    assert corpo["announced"] == "192.168.0.165"
+    # secondi trascorsi, non un orario: distingue "non trovato" da
+    # "non ha ancora guardato"
+    assert 0.0 <= corpo["last_round"] < 5.0
+
+
+def test_health_distingue_non_trovato_da_non_ancora_guardato(client_con_announcer_fermo):
+    corpo = client_con_announcer_fermo.get("/api/health", headers=LOCAL).json()
+    assert corpo["deck"] is None
+    assert corpo["last_round"] is None       # non ha mai fatto un giro
 
 
 def test_layout_richiede_il_token(ctx):
