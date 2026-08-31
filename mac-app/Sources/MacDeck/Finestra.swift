@@ -10,6 +10,7 @@ final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate,
     var finestra: NSWindow!
     var vistaWeb: VistaWebConDrop!
     var pollingSalute: Task<Void, Never>?
+    let registratore = RegistratoreTasti()
 
     func applicationDidFinishLaunching(_ n: Notification) {
         finestra = NSWindow(
@@ -132,7 +133,15 @@ final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate,
               let cmd = corpo["cmd"] as? String else { return }
         switch cmd {
         case "registraScorciatoia":
-            break                      // Task 9
+            registratore.mostra(su: finestra, base: indirizzoAgent) { combo in
+                guard let combo else { return }   // annullato: niente da dire
+                let dati = try! JSONSerialization.data(
+                    withJSONObject: ["keys": combo])
+                let json = String(decoding: dati, as: UTF8.self)
+                self.vistaWeb.evaluateJavaScript(
+                    "window.macdeck && window.macdeck.onScorciatoia && "
+                    + "window.macdeck.onScorciatoia(\(json))")
+            }
         default:
             break                      // un comando ignoto non e' un guasto
         }
@@ -154,6 +163,27 @@ enum Rete {
         guard let (dati, _) = try? await URLSession.shared.data(for: r)
         else { return nil }
         return try? Salute.leggi(dati)
+    }
+
+    /// Manda l'evento grezzo all'agent e torna con la combinazione canonica.
+    ///
+    /// Qui non c'e' nessuna tabella di tasti: keyCode e modificatori vanno
+    /// cosi' come sono, e la traduzione la fa keymap.py dall'altra parte.
+    static func canonicalizza(base: URL, keyCode: Int,
+                              modificatori: [String],
+                              caratteri: String) async -> String? {
+        var r = URLRequest(url: base.appendingPathComponent("api/keys-canon"))
+        r.httpMethod = "POST"
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "keyCode": keyCode, "modifiers": modificatori, "chars": caratteri,
+        ])
+        guard let (dati, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let o = try? JSONSerialization.jsonObject(with: dati)
+                  as? [String: Any]
+        else { return nil }
+        return o["keys"] as? String
     }
 }
 

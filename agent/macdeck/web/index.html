@@ -149,10 +149,13 @@ const posOf = (i,grid) => [i % grid.cols, Math.floor(i/grid.cols)];
 // ------------------------------------------------------------------ modello
 let cfg=null, model=null, token=null, version=0;
 let sel={page:0, index:null}, dirty=false, dragFrom=null;
+// Punta all'input dei tasti mostrato ora, cosi' onScorciatoia sa dove
+// scrivere: il campo viene ricreato a ogni render, non ha un id fisso.
+let campoScorciatoia=null;
 
 const ACTION_FIELDS = {
   app:        [{k:'target', l:'App', pickApp:true}],
-  keys:       [{k:'keys', l:'Combinazione (es. cmd+shift+4)'},
+  keys:       [{k:'keys', l:'Combinazione (es. cmd+shift+4)', pickKeys:true},
                {k:'to', l:'Invia a questa app (opzionale)'}],
   text:       [{k:'text', l:'Testo da digitare'}],
   url:        [{k:'url', l:'URL'}],
@@ -512,6 +515,25 @@ function renderFields(host, action){
       };
       return;
     }
+
+    if(f.pickKeys){
+      // "Registra" esiste solo dentro l'app nativa: dal browser non c'e'
+      // modo di ascoltare i tasti veri, quindi il campo resta a scrittura
+      // manuale com'e' sempre stato.
+      const riga=document.createElement('div'); riga.className='row';
+      riga.appendChild(inp);
+      if(ponte){
+        const btn=document.createElement('button');
+        btn.className='ghost'; btn.textContent='Registra';
+        btn.style.cssText='flex:0 0 auto';
+        btn.onclick=()=>ponte.registraScorciatoia();
+        riga.appendChild(btn);
+      }
+      host.appendChild(riga);
+      campoScorciatoia=inp;
+      return;
+    }
+
     host.appendChild(inp);
   });
 }
@@ -716,6 +738,14 @@ if (ponte) {
     sel.index = i;
     setDirty(true);
     render();
+  };
+
+  // Il guscio ha ascoltato i tasti veri e li ha gia' fatti tradurre
+  // dall'agent; qui restano solo da scrivere nel campo visibile.
+  ponte.onScorciatoia = ({keys}) => {
+    if (!campoScorciatoia) return;
+    campoScorciatoia.value = keys;
+    campoScorciatoia.dispatchEvent(new Event('input'));   // come se l'avessi scritta
   };
 }
 
