@@ -686,6 +686,32 @@ window.addEventListener('beforeunload',e=>{ if(dirty){e.preventDefault();e.retur
 const ponte = window.macdeck;
 if (ponte) {
   document.body.classList.add('nativo');
+
+  // Il guscio consegna un percorso e un punto; qui si decide cosa farne.
+  ponte.onDrop = ({x, y, paths}) => {
+    const percorso = paths && paths[0];    // uno slot e' uno
+    if (!percorso || !percorso.endsWith('.app')) return;
+    const el = document.elementFromPoint(x, y);
+    const cella = el && el.closest('.slot');
+    if (!cella) return;                    // caduto fuori: non succede nulla
+
+    const i = Number(cella.dataset.slot);
+    const p = curPage(), g = gridOf(p);
+    let s = slotAt(p, i);
+    if (!s) {                              // slot vuoto: si crea il pulsante
+      s = {pos: posOf(i, g), label: '', action: {type: 'app', target: percorso}};
+      p.slots.push(s);
+    } else {
+      s.action = {type: 'app', target: percorso};
+    }
+    s.icon = 'app:' + percorso;
+    if (!s.label) {
+      s.label = percorso.split('/').pop().replace(/\.app$/, '');
+    }
+    sel.index = i;
+    setDirty(true);
+    render();
+  };
 }
 
 load();

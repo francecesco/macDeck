@@ -8,7 +8,7 @@ let indirizzoAgent = URL(string: "http://127.0.0.1:8765/")!
 final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate,
                        WKScriptMessageHandler {
     var finestra: NSWindow!
-    var vistaWeb: WKWebView!
+    var vistaWeb: VistaWebConDrop!
     var pollingSalute: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -24,8 +24,13 @@ final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate,
         let conf = WKWebViewConfiguration()
         conf.userContentController.addUserScript(Ponte.userScript())
         conf.userContentController.add(self, name: "macdeck")
-        vistaWeb = WKWebView(frame: .zero, configuration: conf)
+        vistaWeb = VistaWebConDrop(frame: .zero, configuration: conf)
         vistaWeb.autoresizingMask = [.width, .height]
+        // .fileURL si aggiunge a cio' che WebKit registra da solo: senza
+        // questo si romperebbe il trascina-per-riordinare che la pagina
+        // gia' fa fra uno slot e l'altro.
+        vistaWeb.registerForDraggedTypes(
+            vistaWeb.registeredDraggedTypes + [.fileURL])
         finestra.contentView = vistaWeb
 
         finestra.makeKeyAndOrderFront(nil)
