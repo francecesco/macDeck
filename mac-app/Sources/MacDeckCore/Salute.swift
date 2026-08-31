@@ -18,3 +18,15 @@ public struct Salute: Equatable, Sendable {
     /// Il deck e' raggiungibile adesso?
     public var deckInRete: Bool { deck != nil }
 }
+
+extension Salute: Decodable {
+    enum CodingKeys: String, CodingKey {
+        case deck, announced, error
+        case lastRound = "last_round"
+    }
+
+    /// Legge la risposta di GET /api/health cosi' com'e'.
+    public static func leggi(_ dati: Data) throws -> Salute {
+        try JSONDecoder().decode(Salute.self, from: dati)
+    }
+}

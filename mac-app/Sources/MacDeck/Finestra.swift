@@ -35,7 +35,7 @@ final class Finestra: NSObject, NSApplicationDelegate {
             await MainActor.run {
                 switch esito {
                 case .pronto:
-                    self.vistaWeb.load(URLRequest(url: indirizzoAgent))
+                    self.mostraEditor()
                 case .nonRiparte:
                     self.mostraErrore(
                         titolo: "L'agent non riparte",
@@ -53,6 +53,35 @@ final class Finestra: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(
         _ s: NSApplication) -> Bool { true }
+
+    /// Monta web view e barra di salute, poi avvia il polling di quest'ultima.
+    @MainActor func mostraEditor() {
+        let barra = BarraSalute(frame: NSRect(x: 0, y: 0, width: 0, height: 24))
+        barra.translatesAutoresizingMaskIntoConstraints = false
+        vistaWeb.translatesAutoresizingMaskIntoConstraints = false
+        let pila = NSView(frame: finestra.contentLayoutRect)
+        pila.addSubview(vistaWeb)
+        pila.addSubview(barra)
+        NSLayoutConstraint.activate([
+            vistaWeb.topAnchor.constraint(equalTo: pila.topAnchor),
+            vistaWeb.leadingAnchor.constraint(equalTo: pila.leadingAnchor),
+            vistaWeb.trailingAnchor.constraint(equalTo: pila.trailingAnchor),
+            barra.topAnchor.constraint(equalTo: vistaWeb.bottomAnchor),
+            barra.leadingAnchor.constraint(equalTo: pila.leadingAnchor),
+            barra.trailingAnchor.constraint(equalTo: pila.trailingAnchor),
+            barra.bottomAnchor.constraint(equalTo: pila.bottomAnchor),
+            barra.heightAnchor.constraint(equalToConstant: 24),
+        ])
+        finestra.contentView = pila
+        vistaWeb.load(URLRequest(url: indirizzoAgent))
+
+        Task { @MainActor in
+            while !Task.isCancelled {
+                barra.aggiorna(await Rete.salute(indirizzoAgent))
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
 
     @MainActor func mostraErrore(titolo: String, corpo: String) {
         let contenitore = NSView(frame: finestra.contentLayoutRect)
@@ -88,6 +117,14 @@ enum Rete {
         guard let (_, resp) = try? await URLSession.shared.data(for: r),
               let http = resp as? HTTPURLResponse else { return false }
         return http.statusCode == 200
+    }
+
+    static func salute(_ base: URL) async -> Salute? {
+        var r = URLRequest(url: base.appendingPathComponent("api/health"))
+        r.timeoutInterval = 3.0
+        guard let (dati, _) = try? await URLSession.shared.data(for: r)
+        else { return nil }
+        return try? Salute.leggi(dati)
     }
 }
 
