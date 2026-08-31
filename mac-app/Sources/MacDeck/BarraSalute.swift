@@ -33,8 +33,15 @@ final class BarraSalute: NSView {
             return
         }
         agente.stringValue = "🟢 agent"
-        deck.stringValue = s.deckInRete
-            ? "🟢 deck \(s.deck!)"
-            : "⚪︎ deck non in rete"
+        if let indirizzo = s.deck {
+            deck.stringValue = "🟢 deck \(indirizzo)"
+        } else if s.lastRound == nil {
+            // L'Announcer non ha ancora completato un giro: non e' lo stesso
+            // problema di "girato e non trovato", anche se il pallino e'
+            // uguale.
+            deck.stringValue = "⚪︎ deck: non ancora cercato"
+        } else {
+            deck.stringValue = "⚪︎ deck non in rete"
+        }
     }
 }
