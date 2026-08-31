@@ -62,7 +62,9 @@ final class Finestra: NSObject, NSApplicationDelegate, NSWindowDelegate,
                         titolo: "Manca il LaunchAgent",
                         corpo: "L'agent non e' installato come servizio.\n\n"
                              + "cd agent && .venv/bin/python -m macdeck.cli "
-                             + "install-agent")
+                             + "install-agent"
+                             + "\n\nFatto questo, chiudi e riapri MacDeck: "
+                             + "da sola l'app non se ne accorge.")
                 }
             }
         }
