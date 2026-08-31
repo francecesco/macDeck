@@ -8,6 +8,12 @@ import MacDeckCore
 /// pagina un file trascinato arriva come File senza percorso, ed e'
 /// precisamente il motivo per cui l'app nativa esiste.
 final class VistaWebConDrop: WKWebView {
+    // Il cursore "si puo' rilasciare" appare per qualunque file, non solo per
+    // i .app: un PNG trascinato mostra lo stesso invito e poi non fa nulla.
+    // E' voluto, non un bug da stringere: per escludere i non-.app qui
+    // servirebbe insegnare al guscio cos'e' un bundle applicativo, che e'
+    // esattamente la conoscenza che questo design tiene fuori da Swift. Il
+    // filtro vero lo fa gia' la pagina in onDrop.
     override func draggingEntered(_ s: any NSDraggingInfo) -> NSDragOperation {
         percorsi(da: s).isEmpty ? super.draggingEntered(s) : .copy
     }
