@@ -276,3 +276,33 @@ def test_su_cavo_porta_inesistente_non_solleva():
 
     esito = pair_over_usb("/dev/manca", "rete", "chiave", opener=boom)
     assert not esito.ok and "could not open port" in esito.error
+
+
+SUMMARY_OSCURATO = """<dictionary> {
+  BSSID : <redacted>
+  SSID : <redacted>
+  Security : WPA2 Personal
+}"""
+
+
+def test_ssid_oscurato_da_macos_non_e_un_nome_di_rete(fake_ex):
+    # Senza il permesso Localizzazione macOS risponde `SSID : <redacted>`.
+    # Preso alla lettera diventa una rete che si chiama "<redacted>".
+    fake_ex.replies = {"getsummary": R(True, out=SUMMARY_OSCURATO)}
+    assert current_ssid(fake_ex) is None
+
+
+def test_ssid_oscurato_manda_a_passarlo_a_mano(fake_ex):
+    fake_ex.replies = {"getsummary": R(True, out=SUMMARY_OSCURATO)}
+    esito = pair_over_wifi(fake_ex)
+    assert not esito.ok
+    assert "--ssid" in esito.error
+
+
+def test_ssid_oscurato_non_fa_cambiare_rete_al_mac(fake_ex):
+    # Con --password il blocco del portachiavi non scatta, e il giro
+    # partirebbe: il Mac si staccherebbe per tornare su una rete che si
+    # chiama "<redacted>", cioe' su nessuna rete.
+    fake_ex.replies = {"getsummary": R(True, out=SUMMARY_OSCURATO)}
+    pair_over_wifi(fake_ex, password="segreta123")
+    assert not any("-setairportnetwork" in " ".join(c) for c in fake_ex.calls)

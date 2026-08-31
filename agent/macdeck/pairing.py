@@ -30,6 +30,15 @@ NETWORKSETUP = "/usr/sbin/networksetup"
 SECURITY = "/usr/bin/security"
 IPCONFIG = "/usr/sbin/ipconfig"
 
+# Cosa scrive macOS al posto del nome della rete quando non ha il permesso
+# per dirtelo. Non e' un SSID: e' un rifiuto travestito da risposta.
+REDACTED = "<redacted>"
+
+SSID_ILLEGGIBILE = (
+    "non riesco a leggere la rete del Mac: o non e' collegato a nessun WiFi, "
+    "o macOS ne sta nascondendo il nome (al terminale manca il permesso "
+    "Localizzazione). Passala a mano con --ssid 'nome' --password 'segreta'.")
+
 # Quanto aspettare che il Mac si sia effettivamente spostato di rete.
 SETTLE = 3.0
 
@@ -50,7 +59,10 @@ def current_ssid(ex: Executor) -> str | None:
     Da macOS 14 `networksetup -getairportnetwork` non risponde piu' ("You are
     not associated with an AirPort network" anche quando lo sei): il nome
     della rete e' diventato un dato protetto. `ipconfig getsummary` lo
-    riporta ancora.
+    riporta ancora, ma solo a chi ha il permesso Localizzazione: senza,
+    risponde `SSID : <redacted>`. Che e' un "non te lo dico", non un nome —
+    e va trattato come l'assenza di rete, o si finisce per insegnare al
+    deck una rete che si chiama "<redacted>".
     """
     r = ex.run([IPCONFIG, "getsummary", WIFI_IFACE], timeout=5.0)
     if not r.ok or not r.out:
@@ -58,7 +70,9 @@ def current_ssid(ex: Executor) -> str | None:
     # `^\s*SSID :` e non `SSID :`, altrimenti la riga BSSID (l'indirizzo
     # hardware dell'access point) vince perche' viene prima.
     m = re.search(r"^\s*SSID\s*:\s*(.+?)\s*$", r.out, re.M)
-    return m.group(1) if m else None
+    if not m or m.group(1) == REDACTED:
+        return None
+    return m.group(1)
 
 
 def wifi_password(ex: Executor, ssid: str) -> str | None:
@@ -95,7 +109,7 @@ def pair_over_wifi(ex: Executor, *, sender=_send, password: str | None = None,
     """Passa al deck la rete a cui il Mac e' attaccato adesso."""
     ssid = current_ssid(ex)
     if not ssid:
-        return Esito(False, "il Mac non risulta collegato a nessun WiFi")
+        return Esito(False, SSID_ILLEGGIBILE)
     if ssid == AP_SSID:
         return Esito(False, "il Mac e' gia' attaccato al deck, non a una rete")
 

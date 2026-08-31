@@ -232,7 +232,7 @@ def _pair(args) -> int:
             return 1
         ssid = args.ssid or pairing.current_ssid(ex)
         if not ssid:
-            print("  KO   il Mac non risulta collegato a nessun WiFi")
+            print(f"  KO   {pairing.SSID_ILLEGGIBILE}")
             return 1
         psk = args.password or pairing.wifi_password(ex, ssid)
         if not psk:
