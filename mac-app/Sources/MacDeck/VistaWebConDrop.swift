@@ -22,7 +22,8 @@ final class VistaWebConDrop: WKWebView {
 
         let nellaVista = convert(s.draggingLocation, from: nil)
         let p = puntoViewport(daVistaX: nellaVista.x, daVistaY: nellaVista.y,
-                              altezzaVista: bounds.height)
+                              altezzaVista: bounds.height,
+                              vistaCapovolta: isFlipped)
 
         let dati = try! JSONSerialization.data(
             withJSONObject: ["x": p.x, "y": p.y, "paths": elenco])

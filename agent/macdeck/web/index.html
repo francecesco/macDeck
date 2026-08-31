@@ -704,7 +704,12 @@ if (ponte) {
     } else {
       s.action = {type: 'app', target: percorso};
     }
-    s.icon = 'app:' + percorso;
+    // Stessa regola di "Scegli app…": un'icona mdi scelta a mano non va
+    // sovrascritta solo perche' e' arrivata un'app trascinata sopra.
+    const ora = s.icon || '';
+    if (!ora || ora === 'text:?' || ora.startsWith('app:')) {
+      s.icon = 'app:' + percorso;
+    }
     if (!s.label) {
       s.label = percorso.split('/').pop().replace(/\.app$/, '');
     }
