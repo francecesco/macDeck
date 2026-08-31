@@ -1,8 +1,10 @@
 import AppKit
 import WebKit
+import MacDeckCore
 
 let indirizzoAgent = URL(string: "http://127.0.0.1:8765/")!
 
+@MainActor
 final class Finestra: NSObject, NSApplicationDelegate {
     var finestra: NSWindow!
     var vistaWeb: WKWebView!
@@ -19,12 +21,104 @@ final class Finestra: NSObject, NSApplicationDelegate {
         vistaWeb = WKWebView(frame: .zero)
         vistaWeb.autoresizingMask = [.width, .height]
         finestra.contentView = vistaWeb
-        vistaWeb.load(URLRequest(url: indirizzoAgent))
 
         finestra.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        Task.detached {
+            let avvio = Avvio(
+                agentRisponde: { await Rete.risponde(indirizzoAgent) },
+                launchAgentCaricato: { Servizio.caricato() },
+                kickstart: { Servizio.kickstart() },
+                attendi: { try? await Task.sleep(for: .milliseconds(300)) })
+            let esito = await avvio.esegui()
+            await MainActor.run {
+                switch esito {
+                case .pronto:
+                    self.vistaWeb.load(URLRequest(url: indirizzoAgent))
+                case .nonRiparte:
+                    self.mostraErrore(
+                        titolo: "L'agent non riparte",
+                        corpo: Servizio.codaDelLog())
+                case .launchAgentAssente:
+                    self.mostraErrore(
+                        titolo: "Manca il LaunchAgent",
+                        corpo: "L'agent non e' installato come servizio.\n\n"
+                             + "cd agent && .venv/bin/python -m macdeck.cli "
+                             + "install-agent")
+                }
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(
         _ s: NSApplication) -> Bool { true }
+
+    @MainActor func mostraErrore(titolo: String, corpo: String) {
+        let contenitore = NSView(frame: finestra.contentLayoutRect)
+        contenitore.autoresizingMask = [.width, .height]
+
+        let t = NSTextField(labelWithString: titolo)
+        t.font = .boldSystemFont(ofSize: 18)
+        t.frame = NSRect(x: 24, y: contenitore.bounds.height - 56,
+                         width: contenitore.bounds.width - 48, height: 24)
+        t.autoresizingMask = [.width, .minYMargin]
+
+        let scorrevole = NSScrollView(
+            frame: NSRect(x: 24, y: 24, width: contenitore.bounds.width - 48,
+                          height: contenitore.bounds.height - 96))
+        scorrevole.autoresizingMask = [.width, .height]
+        scorrevole.hasVerticalScroller = true
+        let testo = NSTextView(frame: scorrevole.bounds)
+        testo.isEditable = false
+        testo.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        testo.string = corpo
+        scorrevole.documentView = testo
+
+        contenitore.addSubview(t)
+        contenitore.addSubview(scorrevole)
+        finestra.contentView = contenitore
+    }
+}
+
+enum Rete {
+    static func risponde(_ base: URL) async -> Bool {
+        var r = URLRequest(url: base.appendingPathComponent("api/config"))
+        r.timeoutInterval = 2.0
+        guard let (_, resp) = try? await URLSession.shared.data(for: r),
+              let http = resp as? HTTPURLResponse else { return false }
+        return http.statusCode == 200
+    }
+}
+
+enum Servizio {
+    static let etichetta = "io.macdeck.agent"
+
+    private static func launchctl(_ argomenti: [String]) -> (Int32, String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        p.arguments = argomenti
+        let tubo = Pipe()
+        p.standardOutput = tubo
+        p.standardError = tubo
+        guard (try? p.run()) != nil else { return (-1, "") }
+        let dati = tubo.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return (p.terminationStatus, String(decoding: dati, as: UTF8.self))
+    }
+
+    static func caricato() -> Bool {
+        launchctl(["print", "gui/\(getuid())/\(etichetta)"]).0 == 0
+    }
+
+    static func kickstart() -> Bool {
+        launchctl(["kickstart", "-k", "gui/\(getuid())/\(etichetta)"]).0 == 0
+    }
+
+    /// Quando l'agent non parte, il motivo e' nel log. Una pagina bianca no.
+    static func codaDelLog() -> String {
+        let testo = (try? String(contentsOfFile: "/tmp/macdeck.log",
+                                 encoding: .utf8)) ?? "(log non leggibile)"
+        return testo.split(separator: "\n").suffix(30).joined(separator: "\n")
+    }
 }
