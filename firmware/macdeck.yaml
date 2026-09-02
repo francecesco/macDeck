@@ -59,32 +59,52 @@ logger:
   hardware_uart: USB_SERIAL_JTAG
 
 wifi:
-  # In ordine di preferenza. Il deck prova la prima disponibile, quindi
-  # portarlo fuori casa e' solo questione di accendere l'hotspot: si aggancia
-  # da solo, e l'agent sul Mac lo ritrova via Bonjour senza toccare niente.
-  # Le voci con SSID vuoto sono ignorate.
+  # DUE reti, e due sole: casa e ufficio. Niente access point di ripiego e
+  # niente portale, per una ragione precisa e verificata nel sorgente: una
+  # rete insegnata a caldo NON si aggiunge a queste, le SOSTITUISCE. In
+  # `wifi_component.cpp` l'avvio fa
+  #     if (this->pref_.load(&save)) { ... this->set_sta(sta); }
+  # e `set_sta` comincia con `clear_sta()`. Una sola rete salvata in flash
+  # cancella quindi TUTTE quelle compilate, per sempre, comprese quelle che
+  # funzionavano: e' esattamente cosi' che questo deck e' rimasto fuori da
+  # casa pur avendo dentro la password giusta.
+  #
+  # Nota per il futuro: la chiave della preferenza in flash deriva
+  # dall'hash della configurazione, quindi cambiare questo blocco fa
+  # dimenticare al deck la rete salvata. Il flash e' anche la cura.
   networks:
-    - ssid: !secret wifi_ssid
+    - ssid: !secret wifi_ssid                 # casa
       password: !secret wifi_password
-    - ssid: !secret wifi_ssid_2
-      password: !secret wifi_password_2
-    - ssid: !secret wifi_ssid_3
-      password: !secret wifi_password_3
-  # Ultima spiaggia: nessuna rete nota. Il deck alza il proprio access point
-  # e il portale, ci si collega dal telefono e gli si passa una rete nuova.
-  ap:
-    ssid: "MacDeck Fallback"
+    - ssid: !secret wifi_ssid_ufficio         # ufficio
+      password: !secret wifi_password_ufficio
+  # La radio e' la cosa piu' importante che ha: interroga il Mac ogni 2 s e
+  # vive attaccata alla corrente. Il risparmio energetico non compra niente
+  # e paga in pacchetti persi.
+  power_save_mode: none
+  # Ritentativo duro, e non sostituisce quello normale: il ciclo
+  # scan -> connect -> cooldown non si arrende MAI da solo (verificato: lo
+  # stato "solo access point" si imposta unicamente `if (!has_sta())`, e qui
+  # le reti ci sono). Questo copre il caso diverso in cui e' la radio a
+  # essersi impuntata, dove solo un riavvio rimette in moto.
+  #
+  # Da sapere: e' proprio l'assenza di `ap:` a rendere vivo questo timeout.
+  # In wifi_component.cpp il riavvio scatta dentro
+  #     if (!this->has_ap() && this->reboot_timeout_ != 0)
+  # quindi finche' c'era l'access point di ripiego qualunque valore qui era
+  # inerte. Conseguenza pratica: un deck che non vede ne' casa ne' ufficio
+  # si riavvia ogni dieci minuti, ed e' lo stesso stato in cui il cavo e'
+  # l'unica via — se `macdeck pair --usb` non trova risposta, puo' essere
+  # solo un riavvio capitato in mezzo. Va rilanciato, non diagnosticato.
+  reboot_timeout: 10min
   on_connect:
     then:
       - script.execute: fetch_layout
 
-captive_portal:
-
-# Ripiego quando anche il portale non basta: col cavo dati collegato al Mac,
-# `macdeck pair --usb` passa la rete al deck sulla seriale. Non serve
-# ricompilare niente e non dipende dal WiFi, che e' proprio la cosa rotta
-# quando serve. Il cavo resta necessario solo per questo: subito dopo il deck
-# torna a lavorare in WiFi con la sola alimentazione.
+# L'unica via di riserva che resta, e passa dal cavo dati: se il deck non
+# trova ne' casa ne' ufficio, `macdeck pair --usb` gli passa una rete sulla
+# seriale senza ricompilare niente. Da usare sapendo cosa comporta: quella
+# rete finisce nella voce in flash, e quella voce SOSTITUISCE casa e ufficio
+# finche' non si riflasha.
 improv_serial:
 
 mdns:
@@ -396,8 +416,15 @@ script:
       - lambda: |-
           // L'avviso e' l'unica cosa che ruba spazio alle tile, quindi si
           // mostra solo quando c'e' davvero qualcosa da dire.
+          //
+          // Rete assente e Mac assente sono avvisi DISTINTI. Con un solo
+          // messaggio per due guasti diversi, un deck senza WiFi accusava
+          // il Mac: si va a cercare l'agent, il firewall e l'indirizzo,
+          // mentre il problema e' che la radio non e' agganciata a niente.
           const char *msg = nullptr;
-          if (!id(agent_online))
+          if (!network::is_connected())
+            msg = "Nessuna rete WiFi: cerco casa e ufficio";
+          else if (!id(agent_online))
             msg = "Mac non raggiungibile";
           else if (!id(accessibilita_ok))
             msg = "Permesso Accessibilita' mancante: le scorciatoie da "

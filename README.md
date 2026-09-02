@@ -240,41 +240,46 @@ Le reti che il deck conosce stanno in `firmware/secrets.yaml`:
 
 | | |
 |---|---|
-| `wifi_ssid` | casa |
-| `wifi_ssid_2` | Condivisione Internet del Mac — l'SSID è il nome del computer |
-| `wifi_ssid_3` | hotspot del telefono |
+| `wifi_ssid` · `wifi_password` | casa |
+| `wifi_ssid_ufficio` · `wifi_password_ufficio` | ufficio |
 
-Le prova in ordine e si attacca alla prima che vede. Su una rete mai vista,
-il deck alza il proprio access point `MacDeck Fallback`: ci si collega dal
-telefono e gli si passa la rete nuova dal portale.
+**Due reti, e due sole.** Le prova entrambe e si attacca a quella che vede;
+se non ne vede nessuna continua a riprovare senza arrendersi mai, e dopo
+dieci minuti si riavvia per rimettere in moto una radio impuntata. Non alza
+nessun access point e non ha nessun portale: vedi *Perché niente portale*
+più sotto, è una decisione, non una mancanza.
 
 Col Mac spento il deck resta acceso e rallenta i tentativi a uno ogni
 quattordici secondi; quando il Mac torna, riparte da solo.
 
+### Perché niente portale
+
+Una rete insegnata a caldo **non si aggiunge** a quelle compilate: le
+sostituisce. All'avvio ESPHome fa `if (pref_.load(&save)) { set_sta(sta); }`,
+e `set_sta` comincia con `clear_sta()` — una sola voce salvata in flash
+cancella casa e ufficio, per sempre, anche mentre funzionavano. È accaduto:
+un deck con la password di casa giusta compilata dentro è rimasto fuori
+dalla rete di casa per un giorno, mostrando "Mac non raggiungibile" mentre
+inseguiva una rete che non esisteva più.
+
+Per questo l'access point di ripiego e il portale non ci sono più: erano i
+canali che scrivevano quella voce. Le due reti stanno nel firmware, dove
+nulla può cancellarle.
+
 ### Una rete nuova, sul momento
 
-In un posto dove il Mac si attacca al WiFi del luogo, il deck quella rete non
-la conosce. Un comando:
-
-```bash
-macdeck pair
-```
-
-Legge la rete a cui sei collegato e la sua password dal portachiavi (macOS
-chiede conferma la prima volta), la passa al deck e torna sulla rete di
-prima. Il Mac resta senza rete per una ventina di secondi. Il deck la
-ricorda: la volta dopo, in quel posto, si collega da solo.
-
-Se non funziona — l'access point del deck non si vede, o il Mac non riesce a
-spostarsi — c'è il cavo:
+Resta una via, e passa dal cavo dati:
 
 ```bash
 macdeck pair --usb
 ```
 
-Serve un cavo **dati** (molti cavi da ricarica non hanno i fili per i dati).
-Il cavo serve solo per quel passaggio: subito dopo il deck torna in WiFi con
-la sola alimentazione.
+Serve un cavo **dati** (molti cavi da ricarica non hanno i fili per i dati),
+e serve solo per quel passaggio: subito dopo il deck torna in WiFi con la
+sola alimentazione. Da usare sapendo cosa comporta: la rete passata così
+finisce nella voce in flash e **sostituisce casa e ufficio** finché non si
+riflasha. Per una rete che ti serve stabilmente, il posto giusto è
+`secrets.yaml` più un `esphome run`.
 
 **Riflashare il firmware cancella le reti imparate cosi'.** Le credenziali che
 arrivano da `pair` finiscono in una zona di preferenze indicizzata dall'hash

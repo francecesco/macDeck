@@ -6,11 +6,18 @@ Il deck pero' alza gia' un proprio access point con un portale che accetta
 credenziali su `/wifisave`, e ESPHome le salva in modo permanente. Qui c'e'
 chi guida quel portale al posto nostro.
 
-Il giro richiede di staccare il Mac dalla sua rete per una ventina di
-secondi. Da cui la regola che governa questo modulo: **la rete di partenza
-va ripristinata sempre**, anche quando il resto fallisce. Un Mac che resta
-attaccato all'access point di un display e' un guaio peggiore di un
-accoppiamento non riuscito.
+Il giro richiede di staccare il Mac dalla sua rete per un minuto circa, e
+fino a tre minuti e mezzo nel caso peggiore: l'indirizzo sull'access point
+del deck arriva quando il suo DHCP risponde, non a un tempo fisso, e ogni
+aggancio ha per conto suo 30 s di timeout. Da cui la regola che governa questo modulo: **la rete
+di partenza va ripristinata sempre**, anche quando il resto fallisce. Un Mac
+che resta attaccato all'access point di un display e' un guaio peggiore di
+un accoppiamento non riuscito.
+
+ATTENZIONE: questa via vale solo per un firmware che alzi il portale. Quello
+di MacDeck non lo fa piu' — una rete salvata da li' cancellerebbe casa e
+ufficio — quindi `macdeck pair` accetta solo `--usb`. Il codice resta perche'
+il protocollo del portale e le trappole di macOS qui sotto non cambiano.
 """
 
 from __future__ import annotations
@@ -21,7 +28,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from .executor import Executor
+from .executor import Executor, Result
 
 AP_SSID = "MacDeck Fallback"
 AP_IP = "192.168.4.1"
@@ -39,8 +46,40 @@ SSID_ILLEGGIBILE = (
     "o macOS ne sta nascondendo il nome (al terminale manca il permesso "
     "Localizzazione). Passala a mano con --ssid 'nome' --password 'segreta'.")
 
-# Quanto aspettare che il Mac si sia effettivamente spostato di rete.
-SETTLE = 3.0
+# Quanto aspettare tra un sondaggio e l'altro mentre il Mac si sposta di rete.
+SETTLE = 1.0
+
+# La sottorete che il DHCP del deck serve dentro il proprio access point:
+# ESPHome sta su 192.168.4.1 e da' ai client 192.168.4.2 e seguenti.
+AP_SUBNET = "192.168.4."
+
+# Cio' che macOS si assegna da solo quando il DHCP non risponde. Vederlo nel
+# registro non e' un dettaglio: e' la firma di un lease mancato, cioe' del
+# guasto opposto a "il Mac e' tornato sulla sua rete".
+LINK_LOCAL = "169.254."
+
+# Associarsi a un access point e avere un indirizzo su di esso sono due
+# fatti distinti, separati da una trattativa DHCP di durata non garantita.
+# Con un'attesa a tempo di tre secondi la GET al portale partiva prima
+# dell'indirizzo e moriva in `urlopen error timed out`: un guasto
+# inesistente, riportato come guasto. Si aspetta la condizione — l'indirizzo
+# c'e' — e non un tempo che indovina quando arrivera'.
+AP_ATTESA = 60.0
+
+# Quante volte ri-emettere l'associazione all'access point mentre si aspetta
+# il lease. ESPHome, in ripiego, non rinuncia alla rete di casa: continua a
+# ritentarla, e mentre lo fa il proprio access point cade — la trattativa
+# DHCP di macOS puo' finire in quel buco piu' volte di fila. Copre anche
+# l'altro guasto possibile, macOS che rientra da solo su una rete con
+# internet. Cinque perche' ogni giro e' una scommessa indipendente: cinque
+# tentativi da dodici secondi costano un minuto di rete al Mac e non
+# richiedono ne' cavo ne' privilegi di root.
+RIAGGANCI = 5
+
+# Il portale risponde quando il loop principale del deck glielo lascia fare,
+# e quel loop sta disegnando lo schermo. Stessa ragione dei dieci secondi di
+# discovery.py: un tentativo solo misura la fortuna, non la raggiungibilita'.
+TENTATIVI = 3
 
 
 @dataclass
@@ -89,11 +128,60 @@ def wifi_password(ex: Executor, ssid: str) -> str | None:
     return r.out.strip() or None
 
 
-def join(ex: Executor, ssid: str, password: str | None = None):
+def ip_interfaccia(ex: Executor, iface: str = WIFI_IFACE) -> str | None:
+    """L'indirizzo IPv4 dell'interfaccia adesso, o None se non ne ha."""
+    r = ex.run([IPCONFIG, "getifaddr", iface], timeout=5.0)
+    if not r.ok or not r.out:
+        return None
+    return r.out.strip() or None
+
+
+def attendi_ip(ex: Executor, prefisso: str = AP_SUBNET, *,
+               entro: float = AP_ATTESA, passo: float = SETTLE,
+               dormi=time.sleep, visti: list[str] | None = None) -> str | None:
+    """Aspetta che il Mac abbia un indirizzo sulla sottorete data.
+
+    Restituisce l'indirizzo, oppure None se non arriva entro il tempo: in
+    quel caso non c'e' niente da chiedere al portale, e dirlo e' piu' utile
+    che lasciare scadere una richiesta.
+
+    In `visti` finiscono gli indirizzi incontrati per strada, senza
+    ripetizioni. Non e' contabilita' oziosa: un'attesa fallita con
+    l'indirizzo di casa nel registro significa che il Mac non e' rimasto
+    sull'access point del deck, e nessun DHCP e' stato mai in causa. Sono
+    due guasti diversi e un messaggio che non li distingue manda a
+    cercare la cosa sbagliata.
+    """
+    scadenza = time.monotonic() + entro
+    while True:
+        ip = ip_interfaccia(ex)
+        if ip and visti is not None and ip not in visti:
+            visti.append(ip)
+        if ip and ip.startswith(prefisso):
+            return ip
+        if time.monotonic() >= scadenza:
+            return None
+        dormi(passo)
+
+
+# Cosa stampa `networksetup` quando la rete non c'e'. Serve perche' in quel
+# caso esce comunque con codice ZERO: fidarsi del codice di uscita significa
+# credere di essersi spostati di rete mentre non e' successo niente, e la
+# richiesta successiva parte dalla rete sbagliata e scade. Un timeout che
+# sembra un dispositivo muto ed e' invece una domanda fatta al posto
+# sbagliato: due giri di diagnosi buttati, prima di guardare l'output.
+JOIN_FALLITA = "could not find network"
+
+
+def join(ex: Executor, ssid: str, password: str | None = None) -> Result:
     argv = [NETWORKSETUP, "-setairportnetwork", WIFI_IFACE, ssid]
     if password:
         argv.append(password)
-    return ex.run(argv, timeout=30.0)
+    r = ex.run(argv, timeout=30.0)
+    if r.ok and JOIN_FALLITA in (r.out or "").lower():
+        return Result(False, out=r.out,
+                      error=f"la rete '{ssid}' non e' in aria: {r.out.strip()}")
+    return r
 
 
 def _send(url: str) -> bool:
@@ -104,10 +192,18 @@ def _send(url: str) -> bool:
 # --------------------------------------------------------------- il giro
 
 
-def pair_over_wifi(ex: Executor, *, sender=_send, password: str | None = None,
-                   settle: float = SETTLE) -> Esito:
-    """Passa al deck la rete a cui il Mac e' attaccato adesso."""
-    ssid = current_ssid(ex)
+def pair_over_wifi(ex: Executor, *, sender=_send, ssid: str | None = None,
+                   password: str | None = None,
+                   settle: float = SETTLE, attesa: float = AP_ATTESA,
+                   dormi=time.sleep) -> Esito:
+    """Passa al deck la rete a cui il Mac e' attaccato adesso.
+
+    `ssid` scavalca la lettura automatica, ed e' la via d'uscita che
+    SSID_ILLEGGIBILE promette: quando macOS nasconde il nome della rete
+    l'utente lo sa comunque, e senza questo parametro l'accoppiamento via
+    WiFi sarebbe impossibile proprio sul Mac che ne ha bisogno.
+    """
+    ssid = ssid or current_ssid(ex)
     if not ssid:
         return Esito(False, SSID_ILLEGGIBILE)
     if ssid == AP_SSID:
@@ -121,21 +217,86 @@ def pair_over_wifi(ex: Executor, *, sender=_send, password: str | None = None,
             "Passala a mano con --password: senza, staccandosi dalla rete "
             "non si potrebbe piu' tornare indietro.")
 
+    # L'indirizzo che il Mac ha PRIMA di spostarsi. E' il solo modo di
+    # riconoscere poi "macOS e' rientrato sulla sua rete" senza confonderlo
+    # con "il DHCP del deck non ha risposto": vedere un indirizzo che non e'
+    # dell'access point non basta, perche' `attendi_ip` esce appena ne vede
+    # uno dell'access point — quindi TUTTO cio' che resta nel registro e'
+    # per costruzione non dell'access point, e la distinzione basata su
+    # quello era sempre vera. Un link-local se ne accorge da solo.
+    ip_partenza = ip_interfaccia(ex)
+
     ritorno = None
     try:
-        r = join(ex, AP_SSID)
-        if not r.ok:
+        visti: list[str] = []
+        ip = None
+        agganci = 0
+        for _ in range(RIAGGANCI):
+            # L'associazione si ri-emette a ogni giro. Un riaggancio fallito
+            # e' un GIRO perso, non il comando perso: l'access point del deck
+            # cade proprio mentre ESPHome ri-scandisce la rete di casa, ed e'
+            # il transitorio per cui questo ciclo esiste. Farlo abortire al
+            # primo intoppo annullerebbe la protezione con se stessa.
+            if not join(ex, AP_SSID).ok:
+                dormi(settle)
+                continue
+            agganci += 1
+            ip = attendi_ip(ex, entro=attesa / RIAGGANCI, passo=settle,
+                            dormi=dormi, visti=visti)
+            if ip:
+                break
+
+        if not ip and agganci == 0:
             return Esito(
                 False,
-                f"non riesco ad attaccarmi a '{AP_SSID}': {r.error}. "
-                "Il deck alza il suo access point solo quando non trova reti "
-                "note: se e' gia' collegato a qualcosa, non c'e'.")
-        time.sleep(settle)
+                f"l'access point '{AP_SSID}' non e' mai comparso in "
+                f"{RIAGGANCI} tentativi. Il deck lo alza solo quando non "
+                "trova reti note: se e' gia' collegato a qualcosa non c'e', "
+                "e se e' spento o lontano nemmeno.")
+        if not ip:
+            dove = ", ".join(visti) if visti else "nessun indirizzo"
+            # Il link-local per primo: e' una firma inequivocabile (macOS
+            # se lo assegna SOLO quando il DHCP tace), mentre l'indirizzo di
+            # partenza potrebbe coincidere per caso.
+            if any(v.startswith(LINK_LOCAL) for v in visti):
+                perche = ("Il Mac e' rimasto sull'access point ma si e' "
+                          f"assegnato un indirizzo {LINK_LOCAL}x da solo, "
+                          "che e' cio' che fa quando il DHCP non risponde: "
+                          "il DHCP del deck e' muto perche' occupato a "
+                          "ritentare la rete di casa. Riprova, oppure usa "
+                          "il cavo dati.")
+            elif ip_partenza and ip_partenza in visti:
+                perche = (f"Il Mac e' rientrato su '{ssid}' da solo: macOS "
+                          "abbandona le reti senza internet. Tieni il deck "
+                          "vicino e riprova, oppure usa il cavo dati.")
+            else:
+                perche = ("Il DHCP del deck non ha risposto: e' occupato a "
+                          "ritentare la rete di casa. Riprova, oppure usa "
+                          "il cavo dati.")
+            return Esito(
+                False,
+                f"attaccato a '{AP_SSID}' {agganci} volte su {RIAGGANCI}, "
+                f"ma senza un indirizzo su {AP_SUBNET}x entro {attesa:g}s "
+                f"complessivi di attesa (visto invece: {dove}). " + perche)
 
         url = (f"http://{AP_IP}/wifisave?"
                + urllib.parse.urlencode({"ssid": ssid, "psk": psk}))
-        if not sender(url):
-            return Esito(False, "il portale del deck ha rifiutato le credenziali")
+        ultimo: Exception | None = None
+        passato = False
+        for tentativo in range(TENTATIVI):
+            try:
+                if not sender(url):
+                    return Esito(
+                        False,
+                        "il portale del deck ha rifiutato le credenziali")
+                passato = True
+                break
+            except Exception as exc:                           # noqa: BLE001
+                ultimo = exc
+                if tentativo < TENTATIVI - 1:
+                    dormi(settle)
+        if not passato:
+            raise ultimo if ultimo else RuntimeError("invio non riuscito")
         ritorno = Esito(True, ssid=ssid)
     except Exception as exc:                                   # noqa: BLE001
         ritorno = Esito(False, f"{exc}")
@@ -247,8 +408,19 @@ def pair_over_usb(porta: str, ssid: str, password: str, *,
                     return Esito(True, ssid=ssid)
             if not pezzo:
                 time.sleep(0.05)
+        # La terza causa non e' un errore di configurazione ed e' la piu'
+        # probabile: senza `ap:` il firmware ha `reboot_timeout` attivo
+        # (in wifi_component.cpp il riavvio scatta `if (!has_ap() &&
+        # reboot_timeout_ != 0)`), quindi un deck che non trova ne' casa ne'
+        # ufficio si riavvia ogni dieci minuti — ed e' esattamente lo stato
+        # in cui si usa il cavo. Un riavvio dentro questa finestra fa
+        # sparire la porta USB_SERIAL_JTAG: non c'e' niente da aggiustare,
+        # c'e' da rilanciare il comando.
         return Esito(False, "nessuna risposta dal deck sul cavo: porta "
-                            "sbagliata, o firmware senza improv_serial")
+                            "sbagliata, firmware senza improv_serial, "
+                            "oppure il deck si e' riavviato proprio adesso "
+                            "(senza rete lo fa ogni 10 minuti): rilancia "
+                            "il comando")
     except Exception as exc:                                   # noqa: BLE001
         return Esito(False, f"{exc}")
     finally:

@@ -503,12 +503,59 @@ uno slot libero serve un **segnaposto**: il deck sceglie fra le reti che
 effettivamente vede, quindi un SSID inesistente non costa nulla e non viene
 mai tentato.
 
+### Una rete salvata non si aggiunge alle compilate: le cancella
+
+Questo è il difetto più costoso incontrato nel progetto, e non era nostro:
+sta nel modo in cui ESPHome carica le credenziali salvate.
+
+```cpp
+SavedWifiSettings save{};
+if (this->pref_.load(&save)) {
+  WiFiAP sta{};
+  sta.set_ssid(save.ssid);
+  sta.set_password(save.password);
+  this->set_sta(sta);          // <- set_sta, non add_sta
+}
+```
+
+`set_sta` comincia con `clear_sta()`. Quindi **una sola** rete insegnata a
+caldo — dal portale o da improv — azzera tutte le reti compilate, per
+sempre, comprese quelle che funzionavano. La memoria del deck tiene una
+coppia SSID/password sola: `SavedWifiSettings` non è una lista.
+
+Il sintomo, misurato: un deck con `FASTWEB-45H7P7` e la password giusta
+compilate dentro è rimasto un giorno fuori dalla rete di casa mostrando
+"Mac non raggiungibile", perché all'avvio la voce in flash cancellava le tre
+reti del firmware e ne imponeva una che non c'era più. La password non era
+mai stata il problema.
+
+Da qui la modalità di connessione attuale: **due reti nel firmware — casa e
+ufficio — e nessun canale che possa riscriverle**. Fuori l'access point di
+ripiego, fuori `captive_portal`. Resta `improv_serial` sul cavo come unica
+via di riserva, con la stessa avvertenza scritta accanto: quello che passa
+da lì sostituisce le due reti finché non si riflasha.
+
+Un effetto collaterale che lavora a favore: la chiave della preferenza
+deriva dall'hash della configurazione, quindi **cambiare il blocco `wifi:`
+fa dimenticare al deck la rete salvata**. Il flash è anche la cura.
+
+E il ritentativo non va aggiunto, c'è già: lo stato "solo access point" si
+imposta unicamente `if (!this->has_sta())`, e con reti configurate quel ramo
+non si prende mai. Il ciclo scan → connect → cooldown non si arrende. A
+`reboot_timeout: 10min` resta il caso diverso, la radio impuntata, dove solo
+un riavvio rimette in moto.
+
 ### Insegnare al deck una rete che non esisteva alla compilazione
+
+> Questa sezione descrive `macdeck pair` **via WiFi**, che dipende dal
+> portale: il firmware attuale non lo alza più, per la ragione sopra. Vale
+> solo la variante `--usb`. Il resto è conservato perché le due trappole di
+> macOS qui sotto restano vere e costano tempo a chiunque le riscopra.
 
 Fuori casa il Mac si attacca al WiFi del posto, e quella password non
 esisteva quando il firmware è stato compilato. Il pezzo che serviva c'era
-già: il portale del deck espone `/wifisave?ssid=…&psk=…` e ESPHome salva
-quelle credenziali **in modo permanente**. `macdeck pair` si limita a
+già: il portale del deck esponeva `/wifisave?ssid=…&psk=…` e ESPHome salvava
+quelle credenziali **in modo permanente**. `macdeck pair` si limitava a
 guidarlo al posto nostro.
 
 La regola che governa `pairing.py` è una sola, e vale più del resto:
@@ -522,8 +569,15 @@ accoppiamento non riuscito — e per lo stesso motivo, **senza la password
 della rete di partenza il giro non comincia nemmeno**: staccarsi senza
 saperla significa non poterci più tornare.
 
-Due trappole di macOS lungo la strada:
+Tre trappole di macOS lungo la strada:
 
+- `networksetup -setairportnetwork` stampa *"Could not find network X."* ed
+  esce con **codice 0**. Chi guarda il codice di uscita crede di essersi
+  spostato di rete mentre non è successo niente, e la richiesta successiva
+  parte dalla rete sbagliata e scade: un timeout che sembra un dispositivo
+  muto. Sono due diagnosi finite fuori strada prima di leggere l'output.
+  `join()` ora controlla il testo, e c'è un test che fallisce solo per
+  quello.
 - Da macOS 14 `networksetup -getairportnetwork` risponde *"You are not
   associated with an AirPort network"* **anche quando lo sei**: il nome della
   rete è diventato un dato protetto. Si legge da `ipconfig getsummary en0`.

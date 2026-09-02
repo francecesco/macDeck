@@ -63,3 +63,16 @@ def test_pair_senza_cavo_lo_dice_e_non_esplode(tmp_path, capsys, monkeypatch):
 def test_pair_e_registrato_fra_i_comandi(capsys):
     rc = cli.main(["--help"])
     assert "pair" in capsys.readouterr().out
+
+
+def test_pair_via_wifi_dice_che_il_portale_non_esiste_piu(tmp_path, capsys):
+    # Il firmware non alza piu' l'access point di ripiego ne' il portale:
+    # una rete insegnata da li' CANCELLA casa e ufficio (set_sta ->
+    # clear_sta), ed e' il difetto che ha tenuto il deck fuori rete per un
+    # giorno. Un comando che non puo' piu' riuscire deve dirlo subito,
+    # invece di far cercare per un'ora un access point che non c'e'.
+    rc = cli.main(["pair", "--ssid", "Casa", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "--usb" in out
+    assert "portale" in out.lower()

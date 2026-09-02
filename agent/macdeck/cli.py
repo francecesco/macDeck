@@ -220,6 +220,21 @@ def _token(args) -> int:
 
 def _pair(args) -> int:
     """Insegna al deck la rete a cui il Mac e' attaccato adesso."""
+    # Il firmware non alza piu' l'access point di ripiego ne' il portale, e
+    # senza portale la via WiFi non ha nessuno con cui parlare. Dirlo qui,
+    # prima di qualunque chiamata di rete, invece di lasciar cercare per
+    # un'ora un access point che non c'e': e' esattamente il tempo che e'
+    # costato scoprirlo dal lato sbagliato. Il ramo WiFi qui sotto resta
+    # perche' vale per un firmware che il portale lo alzi: la guardia dice
+    # che questo non e' quel firmware, non che quel codice sia sbagliato.
+    if not args.usb:
+        print("  KO   questo firmware non alza piu' un portale WiFi: le due")
+        print("       reti (casa e ufficio) stanno in firmware/secrets.yaml,")
+        print("       e una rete insegnata a caldo le CANCELLEREBBE.")
+        print("       Per una rete nuova sul momento: `macdeck pair --usb`.")
+        print("       Per una rete stabile: secrets.yaml + `esphome run`.")
+        return 1
+
     ex = Executor()
 
     if args.usb:
@@ -242,10 +257,13 @@ def _pair(args) -> int:
         print(f"  --   passo '{ssid}' al deck sul cavo {porta}...")
         esito = pairing.pair_over_usb(porta, ssid, psk)
     else:
-        ssid_ora = pairing.current_ssid(ex)
+        ssid_ora = args.ssid or pairing.current_ssid(ex)
         print(f"  --   rete attuale: {ssid_ora or 'nessuna'}")
-        print("  --   il Mac restera' senza rete per una ventina di secondi.")
-        esito = pairing.pair_over_wifi(ex, password=args.password)
+        print("  --   il Mac restera' senza rete un minuto circa, e fino a")
+        print("       tre minuti e mezzo nel caso peggiore: cinque agganci")
+        print("       da 30 s di timeout piu' un minuto di attesa in tutto.")
+        esito = pairing.pair_over_wifi(ex, ssid=args.ssid,
+                                       password=args.password)
 
     if not esito.ok:
         print(f"  KO   {esito.error}")
@@ -284,14 +302,15 @@ def main(argv: list[str] | None = None) -> int:
         ("install-agent", _install_agent, "installa il LaunchAgent"),
         ("uninstall-agent", _uninstall_agent, "rimuove il LaunchAgent"),
         ("token", _token, "stampa il token condiviso"),
-        ("pair", _pair, "insegna al deck la rete WiFi di adesso"),
+        ("pair", _pair, "insegna al deck una rete nuova, sul cavo dati"),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--root", type=Path, default=None,
                        help="directory di configurazione alternativa (per i test)")
         if name == "pair":
             p.add_argument("--usb", action="store_true",
-                           help="passa la rete sul cavo dati invece che via WiFi")
+                           help="passa la rete sul cavo dati: con questo "
+                                "firmware e' l'unica via, ed e' obbligatoria")
             p.add_argument("--port", default=None,
                            help="porta seriale (di norma si trova da sola)")
             p.add_argument("--ssid", default=None,
