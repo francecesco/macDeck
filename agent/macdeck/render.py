@@ -12,7 +12,7 @@ import io
 import json
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageColor
 
 from . import icons
 
@@ -66,20 +66,22 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int,
             lines.append(current)
     if len(lines) > max_lines:
         lines = lines[:max_lines]
-        last = lines[-1]
-        while last and draw.textlength(last + "…", font=font) > max_w:
-            last = last[:-1]
-        lines[-1] = last + "…"
+        lines[-1] = _ellipsize(draw, lines[-1], font, max_w)
     return lines
 
 
-def _dim(color: str, background: str) -> str:
-    """Il colore del testo attenuato verso lo sfondo della tile."""
-    def rgb(h: str) -> tuple[int, int, int]:
-        h = h.lstrip("#")
-        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    a, b = rgb(color), rgb(background)
-    return "#%02x%02x%02x" % tuple((x * 3 + y * 2) // 5 for x, y in zip(a, b))
+def _dim(color: str, background: str) -> str | tuple[int, int, int]:
+    """Il colore del testo attenuato verso lo sfondo della tile.
+
+    Ritorna la tupla (r, g, b) del colore sfumato. Se i colori non sono
+    validi, ritorna il colore originale senza sfumare.
+    """
+    try:
+        a = ImageColor.getrgb(color)
+        b = ImageColor.getrgb(background)
+    except ValueError:
+        return color
+    return tuple((x * 3 + y * 2) // 5 for x, y in zip(a, b))
 
 
 def _ellipsize(draw, text: str, font, max_w: int) -> str:

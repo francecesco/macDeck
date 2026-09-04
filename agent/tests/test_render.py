@@ -1,6 +1,6 @@
 import io
 
-from PIL import Image
+from PIL import Image, ImageColor, ImageDraw
 
 from macdeck import layout as L
 from macdeck import render
@@ -146,8 +146,16 @@ def test_info_valore_vuoto_mostra_solo_la_didascalia_senza_sollevare():
 
 def test_info_valore_lunghissimo_resta_nel_box():
     lungo = "Un titolo di brano davvero interminabile " * 4
+    w, h = int(BOXES[0]["w"]), int(BOXES[0]["h"])
     im = render.render_tile(_info(label=lungo, box=BOXES[0]), L.DEFAULT_THEME)
-    assert im.size == (BOXES[0]["w"], BOXES[0]["h"])
+    assert im.size == (w, h)
+    # Controlla che il margine destro contenga solo il colore di fondo
+    bg_color = ImageColor.getrgb(L.DEFAULT_THEME["tile"])
+    px = im.load()
+    pad = render.PAD
+    for x in range(w - pad * 2, w - 2):
+        for y in range(h // 4, 3 * h // 4):
+            assert px[x, y] == bg_color, f"Testo spillato oltre il box a ({x}, {y})"
 
 
 def test_info_con_icona_e_diversa_da_senza():
@@ -163,3 +171,45 @@ def test_cache_distingue_kind_e_caption():
     b = c.png({**_info(), "label": "X", "icon": "text:A"}, L.DEFAULT_THEME)
     assert a != b
     assert c.size == 2
+
+
+def test_dim_accetta_nomi_e_hex_corti():
+    # Test con colore nominale e hex corto nel tema
+    im1 = render.render_tile(_info(color="red", caption="Y"), L.DEFAULT_THEME)
+    assert im1.size == (3 * BOXES[0]["w"] + 2 * L.GUTTER, BOXES[0]["h"])
+
+    # Test con hex corto nel tema di testo
+    im2 = render.render_tile(_info(caption="Z"), {**L.DEFAULT_THEME, "text": "#fff"})
+    assert im2.size == (3 * BOXES[0]["w"] + 2 * L.GUTTER, BOXES[0]["h"])
+
+
+def test_dim_attenua_verso_lo_sfondo():
+    # _dim("#ffffff", "#000000") dovrebbe tornare un grigio fra i due
+    result = render._dim("#ffffff", "#000000")
+    # Risultato è una tupla (r, g, b)
+    assert isinstance(result, tuple)
+    r, g, b = result
+    # Ogni canale deve essere strettamente fra 0 e 255 esclusivi
+    for c in (r, g, b):
+        assert 0 < c < 255
+
+
+def test_ellipsize_tronca_con_ellissi_dentro_la_larghezza():
+    im = Image.new("RGB", (300, 100), "white")
+    draw = ImageDraw.Draw(im)
+    font = render.resolve_font("SFNS", 14)
+
+    # Stringa lunga da troncare
+    long_string = "X" * 200
+    result = render._ellipsize(draw, long_string, font, max_w=100)
+
+    # Deve terminare con ellissi
+    assert result.endswith("…")
+
+    # Deve stare dentro max_w
+    assert draw.textlength(result, font=font) <= 100
+
+    # Stringa corta ritornata intatta
+    short_string = "short"
+    result_short = render._ellipsize(draw, short_string, font, max_w=100)
+    assert result_short == short_string
