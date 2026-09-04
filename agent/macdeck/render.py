@@ -66,7 +66,7 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int,
             lines.append(current)
     if len(lines) > max_lines:
         lines = lines[:max_lines]
-        lines[-1] = _ellipsize(draw, lines[-1], font, max_w)
+        lines[-1] = _ellipsize(draw, lines[-1], font, max_w, force=True)
     return lines
 
 
@@ -84,8 +84,14 @@ def _dim(color: str, background: str) -> str | tuple[int, int, int]:
     return tuple((x * 3 + y * 2) // 5 for x, y in zip(a, b))
 
 
-def _ellipsize(draw, text: str, font, max_w: int) -> str:
-    if draw.textlength(text, font=font) <= max_w:
+def _ellipsize(draw, text: str, font, max_w: int, force: bool = False) -> str:
+    """Tronca il testo con ellissi se non rientra in max_w.
+
+    Se force=True, sempre aggiunge "…" (anche se il testo entra, per la
+    segnalazione di troncamento). Se force=False, ritorna il testo intatto
+    se gia' rientra.
+    """
+    if not force and draw.textlength(text, font=font) <= max_w:
         return text
     while text and draw.textlength(text + "…", font=font) > max_w:
         text = text[:-1]

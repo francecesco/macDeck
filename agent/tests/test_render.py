@@ -213,3 +213,23 @@ def test_ellipsize_tronca_con_ellissi_dentro_la_larghezza():
     short_string = "short"
     result_short = render._ellipsize(draw, short_string, font, max_w=100)
     assert result_short == short_string
+
+
+def test_wrap_tronca_con_ellissi_quando_supera_le_righe():
+    im = Image.new("RGB", (300, 100), "white")
+    draw = ImageDraw.Draw(im)
+    font = render.resolve_font("SFNS", 12)
+
+    # Esempio: etichetta che avrebbe 3+ righe, tronca a 2 con ellissi
+    text = "uno due tre quattro cinque sei sette otto nove dieci undici dodici"
+    out = render._wrap(draw, text, font, max_w=80, max_lines=2)
+
+    assert len(out) == 2
+    assert out[-1].endswith("…"), f"Ultima riga deve finire con ellissi, ma è: {out[-1]}"
+    assert draw.textlength(out[-1], font=font) <= 80
+
+    # Etichetta che sta in 2 righe: ritornata senza ellissi
+    short_text = "uno due tre"
+    out_short = render._wrap(draw, short_text, font, max_w=80, max_lines=2)
+    assert all(not line.endswith("…") for line in out_short), \
+        f"Testo che entra in 2 righe non deve avere ellissi: {out_short}"
