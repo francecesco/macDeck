@@ -105,6 +105,98 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                  "action": {"type": "media", "op": "next"}},
             ],
         },
+
+        # --- pagine per app: compaiono, e il deck ci salta, quando l'app e'
+        #     in primo piano. Le scorciatoie sono quelle di default delle
+        #     app: si correggono dalla GUI se una versione le cambia.
+        {
+            "name": "Spotify",
+            "app": "com.spotify.client",
+            "grid": {"cols": 3, "rows": 2},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "span": 3, "icon": "mdi:music",
+                 "label": "{media.title}", "caption": "{media.artist}"},
+                {"pos": [0, 1], "label": "Indietro", "icon": "mdi:skip-previous",
+                 "action": {"type": "media", "op": "prev"}},
+                {"pos": [1, 1], "label": "Play / Pausa", "icon": "mdi:play-pause",
+                 "action": {"type": "media", "op": "play_pause"}},
+                {"pos": [2, 1], "label": "Avanti", "icon": "mdi:skip-next",
+                 "action": {"type": "media", "op": "next"}},
+            ],
+        },
+        {
+            "name": "Mail",
+            "app": "com.apple.mail",
+            "grid": {"cols": 3, "rows": 2},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "span": 3, "icon": "mdi:email",
+                 "label": "{mail.unread}", "caption": "da leggere"},
+                {"pos": [0, 1], "label": "Nuovo", "icon": "mdi:email-plus",
+                 "action": {"type": "keys", "keys": "cmd+n"}},
+                {"pos": [1, 1], "label": "Rispondi", "icon": "mdi:reply",
+                 "action": {"type": "keys", "keys": "cmd+r"}},
+                {"pos": [2, 1], "label": "Archivia", "icon": "mdi:archive-arrow-down",
+                 "action": {"type": "keys", "keys": "ctrl+cmd+a"}},
+            ],
+        },
+        {
+            "name": "Claude Code",
+            "app": ["com.googlecode.iterm2", "com.apple.Terminal"],
+            "when": "claude.alive",
+            "grid": {"cols": 3, "rows": 3},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "icon": "mdi:robot-outline",
+                 "label": "{claude.model}", "caption": "modello"},
+                {"pos": [1, 0], "kind": "info", "icon": "mdi:gauge",
+                 "label": "{claude.remaining|int}%", "caption": "contesto rimanente"},
+                {"pos": [2, 0], "kind": "info", "icon": "mdi:folder-outline",
+                 "label": "{claude.dir}", "caption": "{claude.branch}"},
+                {"pos": [0, 1], "label": "Esc", "icon": "mdi:keyboard-esc",
+                 "action": {"type": "keys", "keys": "escape"}},
+                {"pos": [1, 1], "label": "Invio", "icon": "mdi:keyboard-return",
+                 "action": {"type": "keys", "keys": "return"}},
+                {"pos": [2, 1], "label": "Modalità", "icon": "mdi:swap-horizontal",
+                 "action": {"type": "keys", "keys": "shift+tab"}},
+                {"pos": [0, 2], "label": "/compact", "icon": "mdi:arrow-collapse",
+                 "action": {"type": "sequence", "steps": [
+                     {"type": "text", "text": "/compact"},
+                     {"type": "keys", "keys": "return"}]}},
+                {"pos": [1, 2], "label": "/clear", "icon": "mdi:broom",
+                 "action": {"type": "sequence", "steps": [
+                     {"type": "text", "text": "/clear"},
+                     {"type": "keys", "keys": "return"}]}},
+            ],
+        },
+        {
+            "name": "Slack",
+            "app": "com.tinyspeck.slackmacgap",
+            "grid": {"cols": 3, "rows": 2},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "span": 3, "icon": "mdi:slack",
+                 "label": "{slack.badge}", "caption": "non letti"},
+                {"pos": [0, 1], "label": "Non letti", "icon": "mdi:email-mark-as-unread",
+                 "action": {"type": "keys", "keys": "shift+cmd+a"}},
+                {"pos": [1, 1], "label": "Cerca", "icon": "mdi:magnify",
+                 "action": {"type": "keys", "keys": "cmd+k"}},
+                {"pos": [2, 1], "label": "Thread", "icon": "mdi:forum",
+                 "action": {"type": "keys", "keys": "shift+cmd+t"}},
+            ],
+        },
+        {
+            "name": "Calendar",
+            "app": "com.apple.iCal",
+            "grid": {"cols": 3, "rows": 2},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "span": 3, "icon": "mdi:calendar-clock",
+                 "label": "{calendar.next}", "caption": "{calendar.next_at}"},
+                {"pos": [0, 1], "label": "Oggi", "icon": "mdi:calendar-today",
+                 "action": {"type": "keys", "keys": "cmd+t"}},
+                {"pos": [1, 1], "label": "Settimana", "icon": "mdi:calendar-week",
+                 "action": {"type": "keys", "keys": "cmd+2"}},
+                {"pos": [2, 1], "label": "Nuovo", "icon": "mdi:calendar-plus",
+                 "action": {"type": "keys", "keys": "cmd+n"}},
+            ],
+        },
     ],
 }
 

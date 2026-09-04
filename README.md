@@ -2,8 +2,11 @@
 
 Un pannello touch da scrivania che lancia app, invia scorciatoie ed esegue script
 sul MacBook, e mostra in tempo reale volume, brano in riproduzione e stato del
-sistema. I pulsanti si configurano da una **GUI web sul Mac**: il firmware si
-flasha una volta e non lo si tocca più.
+sistema. Quando davanti c'è Spotify, Mail, Slack, Calendar o un terminale con
+Claude Code, il deck **salta da solo alla pagina di quell'app**: comandi e
+dati vivi (brano, non lette, modello e contesto rimanente). I pulsanti si
+configurano da una **GUI web sul Mac**: il firmware si flasha una volta e non
+lo si tocca più.
 
 ![anteprima delle tile](docs/provino-tile.png)
 
@@ -171,6 +174,54 @@ pages:
 Le posizioni sono **sparse**: i buchi nella griglia sono naturali e riordinare non
 richiede di riscrivere indici.
 
+### Pagine per app
+
+Una pagina con `app:` compare, e il deck ci salta, quando quell'app è in primo
+piano. Con lo swipe si torna alla griglia; al prossimo cambio di app si risalta.
+
+```yaml
+  - name: Spotify
+    app: com.spotify.client          # nome, bundle id o percorso; anche una lista
+    grid: {cols: 3, rows: 2}
+    slots:
+      - pos: [0, 0]
+        kind: info                     # tile informativa: valore grande, didascalia
+        label: "{media.title}"         # i segnaposto leggono /state
+        caption: "{media.artist}"
+        span: 3                        # occupa tre colonne
+      - pos: [1, 1]
+        label: Play / Pausa
+        icon: "mdi:play-pause"
+        action: {type: media, op: play_pause}
+```
+
+Le chiavi disponibili per i segnaposto (`{mail.unread}`, `{claude.model}`,
+`{claude.remaining|int}`, `{calendar.next}`, `{slack.badge}`…) le elenca la GUI
+nel menu «Inserisci valore». `app:` e `when:` si combinano: la pagina Claude Code
+ha `app: [com.googlecode.iterm2, com.apple.Terminal]` e `when: claude.alive`.
+
+Nomi che non coincidono e che conviene sapere: iTerm è `iTerm2` come processo,
+`iTerm` come nome visibile, `com.googlecode.iterm2` come bundle. Il Terminale è
+`Terminal` / `com.apple.Terminal`. Calendar è `com.apple.iCal`. Slack è
+`com.tinyspeck.slackmacgap`.
+
+Le chiavi che cambiano ogni pochi secondi (per esempio `{system.cpu}` o
+`{system.ram}`) è meglio non metterle in una tile: ogni cambio di valore
+ridisegna l'intera pagina sul display, e a quella cadenza si vede. Usale solo
+se il ridisegno a ogni poll non ti disturba.
+
+### Il ponte con Claude Code
+
+Modello, contesto rimanente e cartella li conosce solo Claude Code, che li passa
+alla tua `statusLine`. Aggiungi in testa al comando in `~/.claude/settings.json`:
+
+```sh
+input=$(cat); mkdir -p ~/.config/macdeck/claude; printf '%s' "$input" > ~/.config/macdeck/claude/$(echo "$input" | jq -r .session_id).json; # ...poi il resto
+```
+
+`macdeck doctor` dice se i file arrivano. Con più sessioni aperte il deck mostra
+l'ultima con cui hai parlato.
+
 ### Tipi di azione
 
 | Tipo | Campi | Note |
@@ -208,11 +259,19 @@ immagine) · `emoji:` (a colori) · `text:` (fino a 3 caratteri).
   un problema, il piano B è `cliclick`: una funzione da riscrivere, non un rewrite.
 - **12 slot per pagina al massimo**, che è il numero di widget immagine nel firmware. Le
   pagine sono illimitate.
+- **Il cambio pagina segue il polling:** da 1 a 4 s fra il cambio app e il display. Non
+  c'è push, per scelta.
+- **Il badge di Slack** si legge dal Dock via Accessibilità: se non c'è o non è
+  leggibile, la tile mostra la sola didascalia.
+- **Un tocco arriva sempre alla pagina che vedi.** Fra un cambio di app e il poll
+  successivo il display mostra ancora la pagina di prima: il Mac esegue l'azione
+  di quella, non della nuova, perché `/press` e `/screen` agiscono sul mazzo
+  servito all'ultimo `/layout`.
 
 ## Test
 
 ```bash
-cd agent && .venv/bin/python -m pytest        # 284 test (1 skipped), nessun hardware richiesto
+cd agent && .venv/bin/python -m pytest        # 404 test (1 skipped), nessun hardware richiesto
 ```
 
 Il 90% del sistema è testabile senza il display: `executor.py` è l'unico modulo
@@ -224,6 +283,8 @@ chiamate invece di eseguirle.
 - [Design](docs/specs/2026-08-27-macdeck-design.md) — architettura,
   protocollo, decisioni e alternative scartate
 - [Piano di implementazione](docs/plans/2026-08-27-macdeck.md) — 14 task
+- [Design delle pagine per app](docs/specs/2026-09-04-pagine-per-app-design.md)
+- [Piano delle pagine per app](docs/plans/2026-09-04-pagine-per-app.md)
 - [NOTE-TECNICHE.md](NOTE-TECNICHE.md) — note tecniche e trappole incontrate
 
 ## Portare il deck fuori casa

@@ -355,3 +355,33 @@ def test_i_layout_di_ieri_validano_uguali():
         for s in p["slots"]:
             assert s["kind"] == "button" and s["span"] == 1
             assert s["action"] is not None
+
+
+def test_il_default_ha_le_cinque_pagine_per_app():
+    out = L.validate(L.DEFAULT_LAYOUT)
+    per_app = {p["name"]: p["app"] for p in out["pages"] if p["app"]}
+    assert set(per_app) == {"Spotify", "Mail", "Claude Code", "Slack", "Calendar"}
+    assert per_app["Claude Code"] == ["com.googlecode.iterm2", "com.apple.terminal"]
+    claude = next(p for p in out["pages"] if p["name"] == "Claude Code")
+    assert claude["when"] == "claude.alive"
+
+
+def test_le_pagine_per_app_hanno_almeno_una_tile_info_con_segnaposto():
+    from macdeck.state import placeholders
+    out = L.validate(L.DEFAULT_LAYOUT)
+    for p in out["pages"]:
+        if not p["app"]:
+            continue
+        info = [s for s in p["slots"] if s["kind"] == "info"]
+        assert info, p["name"]
+        assert any(placeholders(s["label"]) for s in info), p["name"]
+
+
+def test_i_segnaposto_del_default_esistono_nel_registro():
+    from macdeck import sources
+    from macdeck.state import placeholders
+    note = set(sources.known_keys())
+    for p in L.validate(L.DEFAULT_LAYOUT)["pages"]:
+        for s in p["slots"]:
+            for k in placeholders(s["label"] or "") + placeholders(s["caption"] or ""):
+                assert k in note, f"{p['name']}: {k}"
