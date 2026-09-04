@@ -360,9 +360,11 @@ def _purge_old(dir_: Path, now: float) -> None:
             pass
 
 
-@source("claude", empty={"alive": False, "model": None, "remaining": None,
-                         "dir": None, "branch": None, "session": None},
-        every=5.0)
+CLAUDE_EMPTY = {"alive": False, "model": None, "remaining": None,
+                "dir": None, "branch": None, "session": None}
+
+
+@source("claude", empty=CLAUDE_EMPTY, every=5.0)
 def claude(ex: Executor, ctx: ProbeContext) -> dict | None:
     """Modello, contesto rimanente e cartella dell'ultima sessione di Claude
     Code con cui si e' parlato.
@@ -372,21 +374,19 @@ def claude(ex: Executor, ctx: ProbeContext) -> dict | None:
     sono grandi e privati. Vince il file piu' recente: con piu' sessioni
     aperte e' quasi sempre quella davanti.
     """
-    empty = {"alive": False, "model": None, "remaining": None,
-             "dir": None, "branch": None, "session": None}
     dir_ = paths.claude_dir(ctx.root)
     now = time.time()
     _purge_old(dir_, now)
     f = newest_claude_file(dir_)
     if f is None:
-        return empty
+        return dict(CLAUDE_EMPTY)
     try:
         data = json.loads(f.read_text())
         eta = now - f.stat().st_mtime
     except (OSError, ValueError):
-        return empty
+        return dict(CLAUDE_EMPTY)
     if not isinstance(data, dict):
-        return empty
+        return dict(CLAUDE_EMPTY)
 
     processo = ex.run([PGREP, "-x", "claude"], timeout=2.0)
     alive = processo.ok and eta <= CLAUDE_STALE_S
@@ -399,7 +399,7 @@ def claude(ex: Executor, ctx: ProbeContext) -> dict | None:
         if g.ok and g.out.strip():
             branch = g.out.strip()
     home = str(Path.home())
-    if cwd and cwd.startswith(home):
+    if cwd and (cwd == home or cwd.startswith(home + "/")):
         cwd = "~" + cwd[len(home):]
 
     remaining = (data.get("context_window") or {}).get("remaining_percentage")

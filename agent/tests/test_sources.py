@@ -282,6 +282,27 @@ def test_claude_senza_branch_lascia_null(fake_ex, tmp_path):
     assert sources.claude(fake_ex, _ctx_root(tmp_path))["branch"] is None
 
 
+def test_claude_non_abbrevia_una_cartella_che_somiglia_alla_home(fake_ex, tmp_path):
+    fake_home = str(Path.home())
+    fake_cwd = fake_home + "X/repo"
+    _scrivi(paths.claude_dir(tmp_path), "abc-123",
+            {**STATUS, "workspace": {"current_dir": fake_cwd}})
+    fake_ex.replies = {"pgrep": R(True, out="1\n"),
+                       "branch --show-current": R(True, out="main\n")}
+    c = sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert c["dir"] == fake_cwd
+
+
+def test_claude_la_home_stessa_diventa_tilde(fake_ex, tmp_path):
+    fake_home = str(Path.home())
+    _scrivi(paths.claude_dir(tmp_path), "abc-123",
+            {**STATUS, "workspace": {"current_dir": fake_home}})
+    fake_ex.replies = {"pgrep": R(True, out="1\n"),
+                       "branch --show-current": R(True, out="main\n")}
+    c = sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert c["dir"] == "~"
+
+
 def test_claude_non_e_vincolata_a_unapp_gui():
     assert sources.REGISTRY["claude"].app == ()
     assert sources.REGISTRY["claude"].every == 5.0
