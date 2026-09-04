@@ -92,7 +92,7 @@ def test_front_changed_e_falso_se_lapp_e_la_stessa_di_prima(fake_ex):
     assert sources.front(fake_ex, _ctx(last=prima))["changed"] is False
 
 
-def test_front_senza_bundle_usa_il_nome_delleseguibile(fake_ex):
+def test_front_senza_bundle_lascia_bundle_none(fake_ex):
     fake_ex.replies = {
         "lsappinfo front": R(True, out=LSAPPINFO_FRONT),
         "lsappinfo info": R(True, out='"LSDisplayName"="Boh"\n"CFBundleExecutablePath"="/x/Boh.app/Contents/MacOS/Boh"\n'),
@@ -103,6 +103,24 @@ def test_front_senza_bundle_usa_il_nome_delleseguibile(fake_ex):
 
 def test_front_fallisce_se_lsappinfo_fallisce(fake_ex):
     fake_ex.replies = {"lsappinfo front": R(False, error="boh")}
+    assert sources.front(fake_ex, _ctx()) is None
+
+
+def test_front_senza_eseguibile_usa_il_nome_visibile(fake_ex):
+    fake_ex.replies = {
+        "lsappinfo front": R(True, out=LSAPPINFO_FRONT),
+        "lsappinfo info": R(True, out='"LSDisplayName"="Boh"\n"CFBundleIdentifier"="it.boh.app"\n'),
+    }
+    f = sources.front(fake_ex, _ctx())
+    assert f["app"] == "Boh"
+    assert f["bundle"] == "it.boh.app"
+
+
+def test_front_fallisce_se_info_fallisce(fake_ex):
+    fake_ex.replies = {
+        "lsappinfo front": R(True, out="ASN:0x0-0x1:\n"),
+        "lsappinfo info": R(False, error="boh"),
+    }
     assert sources.front(fake_ex, _ctx()) is None
 
 
