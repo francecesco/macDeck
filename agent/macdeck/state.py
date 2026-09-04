@@ -1,4 +1,4 @@
-"""Lo stato del Mac che il display mostra nell'header.
+"""Lo stato del Mac che il display mostra.
 
 Le sonde girano in un THREAD DI SFONDO e /state restituisce l'ultima
 istantanea dalla memoria, sempre in ~1 ms.
@@ -11,28 +11,25 @@ di ESPHome e' bloccante, quindi quel tempo diventava loop principale fermo, e
 i blocchi accumulati facevano scattare il watchdog del display. Misurato:
 `interval took a long time for an operation (8013 ms)`.
 
-Nota sul dominio: su macOS recente MediaRemote e' chiuso, quindi non esiste
-un "now playing" di sistema leggibile senza helper esterni. Si interrogano i
-player noti. L'audio da browser non e' visibile: e' un limite dichiarato,
-non un bug.
+Le sonde stanno in sources.py, una funzione decorata ciascuna. Qui c'e' il
+ciclo che le esegue con la loro cadenza, la politica di fallimento, e la
+lettura del permesso Accessibilita', che ha una logica sua.
 """
 
 from __future__ import annotations
 
+import re
 import threading
 import time
+from dataclasses import replace
 
-import psutil
-
+from . import sources as S
 from .executor import Executor
 
-MEDIA_PLAYERS = ("Spotify", "Music")
-
-VOLUME_SCRIPT = (
-    "set s to (get volume settings)\n"
-    "return (output volume of s as text) & linefeed & "
-    "(output muted of s as text)"
-)
+# Compatibilita': altri moduli e i test importano questi nomi da qui.
+MEDIA_PLAYERS = S.MEDIA_PLAYERS
+VOLUME_SCRIPT = S.VOLUME_SCRIPT
+MEDIA_SCRIPT = S.MEDIA_SCRIPT
 
 ACCESSIBILITY_SCRIPT = (
     'tell application "System Events" to return name of first process'
@@ -49,44 +46,19 @@ ACCESS_DENIED_MARKERS = (
     "assistive",
 )
 
-
-def _media_script() -> str:
-    branches = []
-    for i, player in enumerate(MEDIA_PLAYERS):
-        keyword = "if" if i == 0 else "else if"
-        branches.append(
-            f'{keyword} running_apps contains "{player}" then\n'
-            f'    tell application "{player}"\n'
-            f'        set out to "{player}" & linefeed\n'
-            "        if player state is playing then\n"
-            '            set out to out & "true" & linefeed\n'
-            "        else\n"
-            '            set out to out & "false" & linefeed\n'
-            "        end if\n"
-            "        set out to out & (name of current track) & linefeed & "
-            "(artist of current track)\n"
-            "        return out\n"
-            "    end tell"
-        )
-    return (
-        'tell application "System Events" to '
-        "set running_apps to name of every process\n"
-        + "\n".join(branches)
-        + '\nelse\n    return "none"\nend if'
-    )
-
-
-MEDIA_SCRIPT = _media_script()
-
-_EMPTY_VOLUME = {"level": None, "muted": None}
-_EMPTY_MEDIA = {"app": None, "playing": False, "title": None, "artist": None}
+# Dopo quanti fallimenti consecutivi una sonda smette di mostrare l'ultimo
+# valore noto. Uno o due sono un Mac sotto carico; tre di fila (con cadenze
+# da 1 a 60 s) sono un'app chiusa male o uno script rotto, e una tile che
+# mostra per ore un brano finito e' peggio di una tile vuota.
+MAX_FAILURES = 3
 
 
 def value_at(data: dict, path: str):
     """Legge un percorso puntato dentro uno snapshot: "media.app".
 
-    Stessa sintassi usata da `state:` sugli slot e da `when:` sulle pagine,
-    perche' un solo modo di indicare un valore e' meglio di due.
+    Stessa sintassi usata da `state:` sugli slot, da `when:` su pagine e
+    slot, e dai segnaposto `{media.app}` nelle etichette: un solo modo di
+    indicare un valore e' meglio di due.
     """
     if not path:
         return None
@@ -98,12 +70,44 @@ def value_at(data: dict, path: str):
     return cur
 
 
-EMPTY_SNAPSHOT = {
-    "volume": dict(_EMPTY_VOLUME),
-    "media": dict(_EMPTY_MEDIA),
-    "system": {"cpu": None, "ram": None, "battery": None, "charging": None},
-    "accessibility_ok": None,
-}
+_PLACEHOLDER = re.compile(r"\{([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)(\|int)?\}")
+
+
+def placeholders(template: str) -> list[str]:
+    """Le chiavi citate in un'etichetta, nell'ordine: serve alla GUI."""
+    return [m.group(1) for m in _PLACEHOLDER.finditer(template or "")]
+
+
+def fill(template: str, data: dict) -> str:
+    """Sostituisce `{a.b}` e `{a.b|int}` con i valori dello snapshot.
+
+    Un valore assente diventa stringa vuota, non un errore: il layout resta
+    valido anche se una sonda tace. L'unico filtro e' `|int`, per non
+    mostrare "38.4%" a chi vuole "38%". Niente formule: se serve logica, la
+    fa la sonda.
+    """
+    if not template:
+        return ""
+
+    def sub(m: re.Match) -> str:
+        v = value_at(data, m.group(1))
+        if v is None:
+            return ""
+        if m.group(2):
+            try:
+                return str(int(float(v)))
+            except (TypeError, ValueError):
+                return ""
+        return str(v)
+
+    return _PLACEHOLDER.sub(sub, template)
+
+
+def snapshot_vuoto(registry: dict | None = None) -> dict:
+    return {**S.empty_snapshot(registry), "accessibility_ok": None}
+
+
+EMPTY_SNAPSHOT = snapshot_vuoto()
 
 
 class StateProbe:
@@ -118,12 +122,21 @@ class StateProbe:
         ex: Executor,
         interval: float = 1.0,
         accessibility_interval: float = 30.0,
+        root=None,
+        sources: dict[str, S.Source] | None = None,
+        clock=time.monotonic,
     ) -> None:
         self.ex = ex
         self.interval = interval
         self.accessibility_interval = accessibility_interval
+        self.root = root
+        self.sources = S.REGISTRY if sources is None else sources
+        self.clock = clock
         self._lock = threading.Lock()
-        self._data: dict = dict(EMPTY_SNAPSHOT)
+        self._data: dict = snapshot_vuoto(self.sources)
+        self._values: dict[str, dict] = {}      # ultimo valore per sonda
+        self._ran_at: dict[str, float] = {}     # ultimo giro per sonda
+        self._failures: dict[str, int] = {}
         self._acc: bool | None = None
         self._acc_at = 0.0
         self._last_error: str | None = None
@@ -142,17 +155,53 @@ class StateProbe:
 
     # ------------------------------------------------------------ aggiornamento
 
-    def refresh(self) -> dict:
-        """Interroga il Mac. Costoso: non va chiamato da un handler HTTP."""
+    def refresh(self, due_only: bool = False) -> dict:
+        """Interroga il Mac. Costoso: non va chiamato da un handler HTTP.
+
+        Con `due_only` gira solo chi ha la cadenza scaduta: e' cosi' che lo
+        chiama il thread. Senza, gira tutto: e' cosi' che lo chiamano i test,
+        `doctor` e il primo avvio.
+        """
+        now = self.clock()
+        dovute = [
+            s for s in self.sources.values()
+            if not due_only or now - self._ran_at.get(s.name, -1e9) >= s.every
+        ]
+        running = (
+            S.running_apps(self.ex) if any(s.app for s in dovute) else frozenset()
+        )
+        base = S.ProbeContext(running=running, now=now, root=self.root)
+        for src in dovute:
+            self._ran_at[src.name] = now
+            self._values[src.name] = self._run_source(src, base)
+
         fresh = {
-            "volume": self._volume(),
-            "media": self._media(),
-            "system": self._system(),
-            "accessibility_ok": self._accessibility(time.monotonic()),
+            **{name: dict(v) for name, v in self._values.items()},
+            "accessibility_ok": self._accessibility(now),
         }
+        for src in self.sources.values():
+            fresh.setdefault(src.name, dict(src.empty))
         with self._lock:
             self._data = fresh
         return fresh
+
+    def _run_source(self, src: S.Source, base: S.ProbeContext) -> dict:
+        if src.app and not any(a in base.running for a in src.app):
+            self._failures[src.name] = 0
+            return dict(src.empty)
+        ctx = replace(base, last=dict(self._values.get(src.name) or src.empty))
+        try:
+            out = src.fn(self.ex, ctx)
+        except Exception:  # noqa: BLE001 - una sonda rotta non ferma le altre
+            out = None
+        if out is None:
+            n = self._failures.get(src.name, 0) + 1
+            self._failures[src.name] = n
+            if n >= MAX_FAILURES:
+                return dict(src.empty)
+            return dict(self._values.get(src.name) or src.empty)
+        self._failures[src.name] = 0
+        return {**src.empty, **out}
 
     # ---------------------------------------------------------------- ciclo
 
@@ -160,7 +209,10 @@ class StateProbe:
         """Prima lettura sincrona, poi aggiornamenti in sfondo."""
         if self._thread is not None:
             return
-        self.refresh()
+        try:
+            self.refresh()
+        except Exception:  # noqa: BLE001
+            pass
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._loop, name="macdeck-state", daemon=True
@@ -176,46 +228,9 @@ class StateProbe:
     def _loop(self) -> None:
         while not self._stop.wait(self.interval):
             try:
-                self.refresh()
+                self.refresh(due_only=True)
             except Exception:  # noqa: BLE001 - il thread non deve morire mai
                 pass
-
-    def _volume(self) -> dict:
-        r = self.ex.osascript(VOLUME_SCRIPT)
-        if not r.ok:
-            return dict(_EMPTY_VOLUME)
-        parts = r.out.strip().splitlines()
-        if len(parts) < 2:
-            return dict(_EMPTY_VOLUME)
-        try:
-            level = int(float(parts[0].strip()))
-        except ValueError:
-            return dict(_EMPTY_VOLUME)
-        return {"level": level, "muted": parts[1].strip().lower() == "true"}
-
-    def _media(self) -> dict:
-        r = self.ex.osascript(MEDIA_SCRIPT)
-        if not r.ok:
-            return dict(_EMPTY_MEDIA)
-        lines = r.out.strip().splitlines()
-        if not lines or lines[0].strip() == "none":
-            return dict(_EMPTY_MEDIA)
-        padded = (lines + ["", "", "", ""])[:4]
-        return {
-            "app": padded[0].strip() or None,
-            "playing": padded[1].strip().lower() == "true",
-            "title": padded[2].strip() or None,
-            "artist": padded[3].strip() or None,
-        }
-
-    def _system(self) -> dict:
-        battery = psutil.sensors_battery()
-        return {
-            "cpu": round(psutil.cpu_percent(interval=None), 1),
-            "ram": round(psutil.virtual_memory().percent, 1),
-            "battery": round(battery.percent) if battery else None,
-            "charging": bool(battery.power_plugged) if battery else None,
-        }
 
     def _accessibility(self, now: float) -> bool:
         """Vero se i tasti si possono inviare.
