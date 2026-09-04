@@ -271,7 +271,7 @@ immagine) · `emoji:` (a colori) · `text:` (fino a 3 caratteri).
 ## Test
 
 ```bash
-cd agent && .venv/bin/python -m pytest        # 404 test (1 skipped), nessun hardware richiesto
+cd agent && .venv/bin/python -m pytest        # 408 test (1 skipped), nessun hardware richiesto
 ```
 
 Il 90% del sistema è testabile senza il display: `executor.py` è l'unico modulo

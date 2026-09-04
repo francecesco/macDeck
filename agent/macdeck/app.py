@@ -64,9 +64,15 @@ def create_app(
             return
         raise HTTPException(status_code=403, detail="solo da localhost")
 
-    def _front_key(stato: dict) -> str | None:
-        front = stato.get("front") or {}
-        return front.get("bundle") or front.get("app")
+    def _chiave_mazzo(risolte: list[dict]) -> tuple[str, ...]:
+        """Le pagine con `app:` presenti nel mazzo risolto, nell'ordine.
+
+        E' questo insieme, non l'app in primo piano, a dire se e' successo
+        qualcosa che giustifica un salto: due app senza nessuna pagina
+        propria (Chrome, Safari) fanno cambiare `front.bundle` ma lasciano
+        il mazzo — e quindi questa chiave — identico.
+        """
+        return tuple(q["name"] for q in risolte if q.get("app"))
 
     def _resolve(stato: dict | None = None) -> list[dict]:
         """Cosa il display deve mostrare adesso: pagine e slot gia' risolti.
@@ -123,12 +129,16 @@ def create_app(
     # Il display agisce su cio' che gli e' stato promesso: /press e /screen
     # leggono il mazzo servito all'ultimo /layout, cosi' un cambio di app fra
     # un poll e l'altro non puo' far eseguire l'azione di un'altra pagina.
-    # "front" e' l'app che era davanti all'ultimo /layout servito: se e'
-    # cambiata, la risposta successiva porta il display a pagina 0, dove sta
-    # la pagina dell'app nuova; se non e' cambiata, si clampa e basta — un
-    # brano nuovo non deve riportare alla pagina Spotify chi e' andato sulla
-    # griglia.
-    servito = {"front": None, "risolte": None, "version": None}
+    # "chiave" e' l'insieme delle pagine con `app:` che c'erano nel mazzo
+    # servito all'ultimo /layout: se e' cambiato, la risposta successiva
+    # porta il display a pagina 0, dove sta la pagina dell'app nuova; se non
+    # e' cambiato, si clampa e basta. Due garanzie, non una sola: un brano
+    # nuovo non deve riportare alla pagina Spotify chi e' andato sulla
+    # griglia, e un cambio fra due app senza pagina propria (Chrome ->
+    # Safari) non deve mangiare lo swipe successivo, perche' senza pagine di
+    # app in mezzo il mazzo servito resta lo stesso anche se l'app davanti
+    # e' un'altra.
+    servito = {"chiave": (), "risolte": None, "version": None}
 
     # Le icone non stanno nel layout: vivono sul disco, dentro i bundle delle
     # app. Se cambia un'icona — o cambia il modo in cui la risolviamo — il
@@ -188,9 +198,9 @@ def create_app(
     def get_layout(page: int = 0) -> dict:
         stato = probe.snapshot()
         risolte = _resolve(stato)
-        chiave = _front_key(stato)
-        if chiave != servito["front"]:
-            servito["front"] = chiave
+        chiave = _chiave_mazzo(risolte)
+        if chiave != servito["chiave"]:
+            servito["chiave"] = chiave
             page = 0 if risolte else _page_index(page, risolte)
         else:
             page = _page_index(page, risolte)

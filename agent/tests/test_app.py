@@ -644,6 +644,8 @@ LSAPP_INFO_SPOTIFY = ('"LSDisplayName"="Spotify"\n"CFBundleIdentifier"="com.spot
                       '"CFBundleExecutablePath"="/Applications/Spotify.app/Contents/MacOS/Spotify"\n')
 LSAPP_INFO_CHROME = ('"LSDisplayName"="Google Chrome"\n"CFBundleIdentifier"="com.google.Chrome"\n'
                      '"CFBundleExecutablePath"="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"\n')
+LSAPP_INFO_SAFARI = ('"LSDisplayName"="Safari"\n"CFBundleIdentifier"="com.apple.Safari"\n'
+                     '"CFBundleExecutablePath"="/Applications/Safari.app/Contents/MacOS/Safari"\n')
 
 LAYOUT_PER_APP = {
     "pages": [
@@ -707,6 +709,22 @@ def test_al_cambio_di_app_il_server_risponde_pagina_zero(ctx):
     probe.refresh()
     body = client.get("/layout?page=1", headers=AUTH).json()
     assert body["page"] == 0 and body["pages"][0] == "Spotify"
+
+
+def test_un_cambio_fra_app_senza_pagina_non_mangia_lo_swipe(ctx):
+    """Chrome e Safari non hanno una pagina propria in LAYOUT_PER_APP: il
+    mazzo servito resta identico passando dall'uno all'altro, quindi il
+    ricordo del salto non deve cambiare — e lo swipe successivo deve
+    arrivare a destinazione invece di essere rispedito a pagina 0."""
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_CHROME)
+    probe.refresh()
+    client.get("/layout?page=0", headers=AUTH)     # fissa il ricordo: nessuna pagina d'app
+    _davanti(fake_ex, LSAPP_INFO_SAFARI)
+    probe.refresh()                                # cambio dal vivo, nessun /layout nuovo
+    body = client.get("/layout?page=1", headers=AUTH).json()  # swipe su Altra
+    assert body["page"] == 1
 
 
 def test_un_brano_nuovo_non_fa_saltare_pagina(ctx):

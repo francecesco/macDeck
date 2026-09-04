@@ -110,7 +110,15 @@ def claude_bridge_status(root: Path | None) -> tuple[bool, str]:
             "       Aggiungi in testa al comando statusLine di ~/.claude/settings.json:\n"
             f"       {CLAUDE_STATUSLINE_SNIPPET}"
         )
-    eta = time.time() - f.stat().st_mtime
+    try:
+        mtime = f.stat().st_mtime
+    except OSError:
+        return False, (
+            "ponte Claude Code assente: nessun file in ~/.config/macdeck/claude.\n"
+            "       Aggiungi in testa al comando statusLine di ~/.claude/settings.json:\n"
+            f"       {CLAUDE_STATUSLINE_SNIPPET}"
+        )
+    eta = time.time() - mtime
     if eta > CLAUDE_STALE_S:
         return False, f"ponte Claude Code: ultimo file {f.name} di {eta / 3600:.1f} ore fa (nessuna sessione viva)"
     return True, f"ponte Claude Code: {f.name} aggiornato {int(eta)} s fa"

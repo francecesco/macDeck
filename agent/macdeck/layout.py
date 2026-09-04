@@ -279,7 +279,6 @@ def app_matches(apps: list[str] | None, front: dict | None) -> bool:
         str(v).lower() for v in (front.get("app"), front.get("name"), front.get("bundle"))
         if v
     }
-    nomi |= {n.removesuffix(".app") for n in nomi}
     return any(a in nomi for a in apps)
 
 

@@ -378,3 +378,11 @@ def test_fill_senza_segnaposto_e_identita():
 def test_placeholders_elenca_le_chiavi():
     assert placeholders("{a.b} e {c.d|int}") == ["a.b", "c.d"]
     assert placeholders("niente") == []
+
+
+def test_fill_accetta_una_chiave_senza_punto():
+    assert fill("{accessibility_ok}", {"accessibility_ok": True}) == "True"
+
+
+def test_placeholders_accetta_una_chiave_senza_punto():
+    assert placeholders("{accessibility_ok} {a.b}") == ["accessibility_ok", "a.b"]

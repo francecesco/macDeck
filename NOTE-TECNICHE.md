@@ -728,10 +728,13 @@ l'elenco dei processi prima di parlare al player.
 
 Il campo `page` di `/layout` era già autoritativo (il display lo adotta quando
 la pagina corrente sparisce). Per far saltare il deck alla pagina dell'app
-davanti non serve altro: il server ricorda l'app davanti all'ultimo `/layout`
-servito e, se è cambiata, risponde `0`. Se non è cambiata, clampa e basta —
-altrimenti un brano nuovo riporterebbe alla pagina Spotify chi era andato
-sulla griglia. Il ricordo si aggiorna **solo** in `/layout`: `/screen` e
+davanti non serve altro: il server ricorda quali pagine con `app:` c'erano nel
+mazzo che ha servito l'ultima volta e, se quell'insieme è cambiato, risponde
+`0`. Se non è cambiato, clampa e basta — altrimenti un brano nuovo
+riporterebbe alla pagina Spotify chi era andato sulla griglia. Il ricordo è
+sul mazzo, non sull'app davanti, perché un cambio fra due app senza pagina
+(Chrome → Safari) non cambia il mazzo e non deve mangiare lo swipe
+successivo. Il ricordo si aggiorna **solo** in `/layout`: `/screen` e
 `/press` non lo toccano.
 
 ### I segnaposto si risolvono in `_resolve()`, non nel renderer
@@ -765,7 +768,7 @@ ricordo si scrive **solo** in `/layout`.
 
 ```bash
 cd agent
-.venv/bin/python -m pytest                        # 265 test, nessun hardware
+.venv/bin/python -m pytest                        # 408 test (1 skipped), nessun hardware
 .venv/bin/python -m macdeck.cli doctor            # permessi e configurazione
 .venv/bin/python -m macdeck.cli token             # token da mettere nei secrets
 .venv/bin/python -m macdeck.cli pair              # insegna al deck la rete di adesso

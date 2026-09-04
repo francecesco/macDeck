@@ -70,7 +70,7 @@ def value_at(data: dict, path: str):
     return cur
 
 
-_PLACEHOLDER = re.compile(r"\{([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)(\|int)?\}")
+_PLACEHOLDER = re.compile(r"\{([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)(\|int)?\}")
 
 
 def placeholders(template: str) -> list[str]:

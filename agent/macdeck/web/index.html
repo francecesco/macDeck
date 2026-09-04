@@ -764,8 +764,9 @@ document.getElementById('pgDel').onclick=()=>{
 document.getElementById('pgApp').oninput=e=>{
   const v=e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
   if(v.length) curPage().app=v; else delete curPage().app;
-  setDirty(true); render();
+  setDirty(true);
 };
+document.getElementById('pgApp').onchange=()=>render();
 document.getElementById('pgWhen').oninput=e=>{
   const v=e.target.value.trim();
   if(v) curPage().when=v; else delete curPage().when;

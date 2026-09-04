@@ -106,6 +106,16 @@ def test_ponte_claude_stantio_non_e_ok(tmp_path):
     assert ok is False and "ore" in msg
 
 
+def test_ponte_claude_file_sparito_fra_glob_e_stat_non_esplode(tmp_path, monkeypatch):
+    # Il file trovato dal glob puo' sparire (rotazione, pulizia) prima dello
+    # stat(): non deve uscire un OSError non gestito da `doctor`.
+    from macdeck import sources
+    fantasma = paths.claude_dir(tmp_path) / "sparito.json"
+    monkeypatch.setattr(sources, "newest_claude_file", lambda d: fantasma)
+    ok, msg = cli.claude_bridge_status(tmp_path)
+    assert ok is False and "statusLine" in msg and "macdeck/claude" in msg
+
+
 def test_pagine_con_app_assente_segnala_solo_le_introvabili(monkeypatch):
     from macdeck import layout as L
     monkeypatch.setattr(cli.icons, "locate_bundle",
