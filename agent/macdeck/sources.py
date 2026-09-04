@@ -191,3 +191,53 @@ def system(ex: Executor, ctx: ProbeContext) -> dict:
         "battery": round(battery.percent) if battery else None,
         "charging": bool(battery.power_plugged) if battery else None,
     }
+
+
+# ------------------------------------------------------- app in primo piano
+
+_INFO_PAIR = re.compile(r'^"([^"]+)"="(.*)"\s*$')
+
+
+def parse_lsappinfo_info(text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        m = _INFO_PAIR.match(line.strip())
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+@source("front", empty={"app": None, "name": None, "bundle": None,
+                        "changed": False}, every=1.0)
+def front(ex: Executor, ctx: ProbeContext) -> dict | None:
+    """L'app in primo piano, con tre nomi.
+
+    Tre perche' non coincidono: iTerm ha eseguibile `iTerm2`, nome visibile
+    `iTerm`, bundle `com.googlecode.iterm2`; Calendar si presenta come
+    "Calendario" su un Mac in italiano. `app:` nel layout puo' usare uno
+    qualunque dei tre.
+
+    `lsappinfo` invece di System Events: ~10 ms contro ~300, e non passa dal
+    permesso Accessibilita'.
+    """
+    r = ex.run([LSAPPINFO, "front"], timeout=2.0)
+    asn = r.out.strip() if r.ok else ""
+    if not asn:
+        return None
+    r = ex.run([LSAPPINFO, "info", "-only", "name,bundleid,executablepath", asn],
+               timeout=2.0)
+    if not r.ok:
+        return None
+    info = parse_lsappinfo_info(r.out)
+    exe = info.get("CFBundleExecutablePath") or ""
+    name = info.get("LSDisplayName") or None
+    app = exe.rsplit("/", 1)[-1] or name
+    bundle = info.get("CFBundleIdentifier") or None
+    if not app and not bundle:
+        return None
+    return {
+        "app": app,
+        "name": name,
+        "bundle": bundle,
+        "changed": (bundle or app) != (ctx.last.get("bundle") or ctx.last.get("app")),
+    }
