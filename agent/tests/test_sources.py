@@ -127,3 +127,60 @@ def test_front_fallisce_se_info_fallisce(fake_ex):
 def test_front_e_registrato_con_cadenza_di_un_secondo():
     assert sources.REGISTRY["front"].every == 1.0
     assert sources.REGISTRY["front"].app == ()
+
+
+def test_mail_legge_le_non_lette(fake_ex):
+    fake_ex.replies = {"unread count": R(True, out="12\n")}
+    assert sources.mail(fake_ex, _ctx()) == {"unread": 12}
+
+
+def test_mail_con_output_strano_fallisce(fake_ex):
+    fake_ex.replies = {"unread count": R(True, out="boh\n")}
+    assert sources.mail(fake_ex, _ctx()) is None
+
+
+def test_mail_e_vincolata_allapp_in_esecuzione():
+    assert sources.REGISTRY["mail"].app == ("com.apple.mail",)
+    assert sources.REGISTRY["mail"].every == 5.0
+
+
+def test_slack_badge_presente(fake_ex):
+    fake_ex.replies = {"AXStatusLabel": R(True, out="3\n")}
+    assert sources.slack(fake_ex, _ctx()) == {"badge": "3"}
+
+
+def test_slack_senza_badge_da_null_non_fallimento(fake_ex):
+    fake_ex.replies = {"AXStatusLabel": R(True, out="missing value\n")}
+    assert sources.slack(fake_ex, _ctx()) == {"badge": None}
+
+
+def test_slack_errore_di_accessibilita_e_un_fallimento(fake_ex):
+    fake_ex.replies = {"AXStatusLabel": R(False, error="-1719")}
+    assert sources.slack(fake_ex, _ctx()) is None
+
+
+def test_slack_e_vincolata_allapp():
+    assert sources.REGISTRY["slack"].app == ("com.tinyspeck.slackmacgap",)
+
+
+def test_calendar_legge_conteggio_e_prossimo_evento(fake_ex):
+    fake_ex.replies = {"every event of c": R(True, out="3\n14:30\tRiunione sprint\n")}
+    assert sources.calendar(fake_ex, _ctx()) == {
+        "next": "Riunione sprint", "next_at": "14:30", "count_today": 3}
+
+
+def test_calendar_senza_eventi(fake_ex):
+    fake_ex.replies = {"every event of c": R(True, out="0\n\n")}
+    assert sources.calendar(fake_ex, _ctx()) == {
+        "next": None, "next_at": None, "count_today": 0}
+
+
+def test_calendar_ha_cadenza_lenta_e_app_vincolata():
+    src = sources.REGISTRY["calendar"]
+    assert src.every == 60.0
+    assert src.app == ("com.apple.ical",)
+
+
+def test_calendar_timeout_e_un_fallimento(fake_ex):
+    fake_ex.replies = {"every event of c": R(False, error="timeout dopo 10.0s")}
+    assert sources.calendar(fake_ex, _ctx()) is None

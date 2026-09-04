@@ -146,6 +146,10 @@ def _media_script() -> str:
 MEDIA_SCRIPT = _media_script()
 
 
+# Nota sul dominio: su macOS recente MediaRemote e' chiuso, quindi non
+# esiste un 'now playing' di sistema leggibile senza helper esterni.
+# Si interrogano i player noti. L'audio da browser non e' visibile:
+# e' un limite dichiarato, non un bug.
 @source("volume", empty={"level": None, "muted": None}, every=1.0)
 def volume(ex: Executor, ctx: ProbeContext) -> dict | None:
     r = ex.osascript(VOLUME_SCRIPT)
@@ -241,3 +245,89 @@ def front(ex: Executor, ctx: ProbeContext) -> dict | None:
         "bundle": bundle,
         "changed": (bundle or app) != (ctx.last.get("bundle") or ctx.last.get("app")),
     }
+
+
+# ------------------------------------------------------------------ Mail
+
+MAIL_SCRIPT = 'tell application "Mail" to return unread count of inbox'
+
+
+@source("mail", empty={"unread": None}, every=5.0, app=("com.apple.mail",))
+def mail(ex: Executor, ctx: ProbeContext) -> dict | None:
+    r = ex.osascript(MAIL_SCRIPT)
+    if not r.ok:
+        return None
+    try:
+        return {"unread": int(r.out.strip())}
+    except ValueError:
+        return None
+
+
+# ----------------------------------------------------------------- Slack
+
+# Slack non ha un dizionario AppleScript per i non letti. Il numero rosso
+# sull'icona del Dock e' pero' un attributo di Accessibilita' leggibile:
+# "missing value" quando il badge non c'e'. Best effort dichiarato.
+SLACK_BADGE_SCRIPT = (
+    'tell application "System Events" to tell process "Dock" to '
+    'return value of attribute "AXStatusLabel" of UI element "Slack" of list 1'
+)
+
+
+@source("slack", empty={"badge": None}, every=5.0,
+        app=("com.tinyspeck.slackmacgap",))
+def slack(ex: Executor, ctx: ProbeContext) -> dict | None:
+    r = ex.osascript(SLACK_BADGE_SCRIPT)
+    if not r.ok:
+        return None
+    badge = r.out.strip()
+    if not badge or badge == "missing value":
+        return {"badge": None}
+    return {"badge": badge}
+
+
+# -------------------------------------------------------------- Calendar
+
+# Gira solo con Calendar aperto (app=), e la pagina Calendar si vede solo
+# con Calendar davanti: quindi in pratica sempre. Il confronto testuale
+# "HH:MM<tab>titolo" trova il primo evento perche' HH:MM ordina bene come
+# stringa. Gli eventi in corso e quelli di tutto il giorno (inizio 00:00)
+# restano fuori: "prossimo" vuol dire che deve ancora cominciare.
+CALENDAR_SCRIPT = """\
+tell application "Calendar"
+    set adesso to current date
+    set fine to adesso - (time of adesso) + 1 * days
+    set n to 0
+    set primo to ""
+    repeat with c in calendars
+        set evs to (every event of c whose start date >= adesso and start date < fine)
+        repeat with e in evs
+            set n to n + 1
+            set t to start date of e
+            set hh to text -2 thru -1 of ("0" & (hours of t))
+            set mm to text -2 thru -1 of ("0" & (minutes of t))
+            set riga to hh & ":" & mm & tab & (summary of e)
+            if primo is "" or riga < primo then set primo to riga
+        end repeat
+    end repeat
+    return (n as text) & linefeed & primo
+end tell"""
+
+
+@source("calendar", empty={"next": None, "next_at": None, "count_today": None},
+        every=60.0, app=("com.apple.ical",))
+def calendar(ex: Executor, ctx: ProbeContext) -> dict | None:
+    r = ex.osascript(CALENDAR_SCRIPT, timeout=10.0)
+    if not r.ok:
+        return None
+    lines = r.out.split("\n")
+    try:
+        count = int(lines[0].strip())
+    except (IndexError, ValueError):
+        return None
+    primo = lines[1] if len(lines) > 1 else ""
+    if "\t" not in primo:
+        return {"next": None, "next_at": None, "count_today": count}
+    ora, titolo = primo.split("\t", 1)
+    return {"next": titolo.strip() or None, "next_at": ora.strip() or None,
+            "count_today": count}
