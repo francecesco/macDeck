@@ -27,10 +27,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from . import actions, icons, keymap, render
 from . import layout as L
+from . import sources
 from .executor import Executor
 from .layout import LayoutStore
 from .render import TileCache
-from .state import StateProbe, value_at
+from .state import StateProbe, fill, value_at
 
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -63,22 +64,37 @@ def create_app(
             return
         raise HTTPException(status_code=403, detail="solo da localhost")
 
-    def _resolve() -> tuple[list[dict], bool]:
+    def _front_key(stato: dict) -> str | None:
+        front = stato.get("front") or {}
+        return front.get("bundle") or front.get("app")
+
+    def _resolve(stato: dict | None = None) -> list[dict]:
         """Cosa il display deve mostrare adesso: pagine e slot gia' risolti.
 
-        Tre cose si decidono qui, tutte dipendenti dallo stato vivo del Mac e
-        quindi impossibili da precalcolare in validate():
+        Quattro cose si decidono qui, tutte dipendenti dallo stato vivo del
+        Mac e quindi impossibili da precalcolare in validate():
 
+        - l'ORDINE del mazzo: prima le pagine la cui `app:` e' in primo
+          piano, poi quelle senza `app:`. Le pagine di app non davanti non
+          ci sono: sarebbero comandi per una finestra che non c'e';
         - quali PAGINE sono visibili (`when:` sulla pagina);
-        - quali SLOT occupano ciascuna casella (`when:` sullo slot): e' cosi'
-          che la riga in basso diventa i comandi multimediali quando c'e' un
-          player attivo, e torna alle app quando non c'e'.
+        - quali SLOT occupano ciascuna casella (`when:` sullo slot);
+        - il TESTO delle etichette: i segnaposto `{media.title}` diventano
+          il valore corrente, cosi' la firma cambia quando cambia il valore.
         """
-        stato = probe.snapshot()
-        pagine = [
-            p for p in store.layout["pages"]
-            if not p.get("when") or bool(value_at(stato, p["when"]))
-        ] or store.layout["pages"]
+        if stato is None:
+            stato = probe.snapshot()
+        front = stato.get("front") or {}
+
+        def visibile(p: dict) -> bool:
+            return not p.get("when") or bool(value_at(stato, p["when"]))
+
+        davanti = [p for p in store.layout["pages"]
+                   if p.get("app") and visibile(p) and L.app_matches(p["app"], front)]
+        base = [p for p in store.layout["pages"] if not p.get("app") and visibile(p)]
+        pagine = (davanti + base) \
+            or [p for p in store.layout["pages"] if not p.get("app")] \
+            or store.layout["pages"]
 
         risolte = []
         for pagina in pagine:
@@ -92,9 +108,20 @@ def create_app(
                 prima = scelti.get(slot["index"])
                 if prima is not None and not (attivo and prima.get("when") is None):
                     continue      # a parita' di casella vince il condizionale
-                scelti[slot["index"]] = {**slot, "box": boxes[slot["index"]]}
+                scelti[slot["index"]] = {
+                    **slot,
+                    "box": L.span_box(boxes, slot["index"], slot.get("span") or 1),
+                    "label": fill(slot.get("label") or "", stato),
+                    "caption": fill(slot.get("caption") or "", stato),
+                }
             risolte.append({**pagina, "slots": [scelti[i] for i in sorted(scelti)]})
         return risolte
+
+    # L'app che era davanti all'ultimo /layout servito. Se e' cambiata, la
+    # risposta successiva porta il display a pagina 0, dove sta la pagina
+    # dell'app nuova. Se non e' cambiata, si clampa e basta: un brano nuovo
+    # non deve riportare alla pagina Spotify chi e' andato sulla griglia.
+    ricordo = {"front": None}
 
     # Le icone non stanno nel layout: vivono sul disco, dentro i bundle delle
     # app. Se cambia un'icona — o cambia il modo in cui la risolviamo — il
@@ -136,6 +163,8 @@ def create_app(
         page = risolte[_page_index(page_index, risolte)]
         for slot in page["slots"]:
             if slot["index"] == slot_index:
+                if slot.get("action") is None:
+                    break             # tile informativa: niente da premere
                 return slot
         raise HTTPException(
             status_code=404,
@@ -146,8 +175,14 @@ def create_app(
 
     @app.get("/layout", dependencies=[Depends(require_token)])
     def get_layout(page: int = 0) -> dict:
-        risolte = _resolve()
-        page = _page_index(page, risolte)
+        stato = probe.snapshot()
+        risolte = _resolve(stato)
+        chiave = _front_key(stato)
+        if chiave != ricordo["front"]:
+            ricordo["front"] = chiave
+            page = 0 if risolte else _page_index(page, risolte)
+        else:
+            page = _page_index(page, risolte)
         p = risolte[page]
         theme = store.layout["theme"]
         version = _signature(risolte)
@@ -173,6 +208,7 @@ def create_app(
                     "state": s.get("state"),
                 }
                 for s in p["slots"]
+                if s.get("action") is not None
             ],
         }
 
@@ -273,6 +309,7 @@ def create_app(
             "version": store.version,
             "error": store.error,
             "action_types": sorted(actions.known_types()),
+            "state_keys": sorted(sources.known_keys() + ["accessibility_ok"]),
             # Lecito qui: questo endpoint e' gia' solo-loopback. Serve alla
             # web UI per interrogare /state, che richiede il token.
             "token": token,
@@ -321,7 +358,8 @@ def create_app(
                     continue
                 seen.add(disco)
                 apps.append({"name": nome, "path": str(bundle),
-                             "disk": disco, "icon": f"app:{bundle}"})
+                             "disk": disco, "icon": f"app:{bundle}",
+                             "bundle": icons.bundle_identifier(bundle)})
         apps.sort(key=lambda a: a["name"].lower())
         mdi = [n for n in icons.mdi_names(root) if not needle or needle in n]
         return {
@@ -352,7 +390,14 @@ def create_app(
         pos = slot.get("pos") or [0, 0]
         boxes = L.slot_boxes(grid)
         index = L.slot_index(pos, grid)
-        slot["box"] = boxes.get(index) or next(iter(boxes.values()))
+        span = slot.get("span") or 1
+        if not isinstance(span, int) or span < 1 or pos[0] + span > grid["cols"]:
+            span = 1
+        base = boxes.get(index) or next(iter(boxes.values()))
+        slot["box"] = L.span_box(boxes, index, span) if index in boxes else base
+        stato = probe.snapshot()
+        slot["label"] = fill(slot.get("label") or "", stato)
+        slot["caption"] = fill(slot.get("caption") or "", stato)
         theme = {**store.layout["theme"], **(body.get("theme") or {})}
         return Response(
             content=render.tile_png(slot, theme, root=root),

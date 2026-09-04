@@ -635,3 +635,155 @@ def test_keys_canon_rifiuta_un_evento_che_non_sa_tradurre(ctx):
     r = client.post("/api/keys-canon", headers=LOCAL,
                     json={"keyCode": 9999, "modifiers": []})
     assert r.status_code == 422
+
+
+# ------------------------------------------------------- pagine per app
+
+LSAPP_LIST = ' 1) "Spotify" ASN:0x0-0x1:\n    bundleID="com.spotify.client"\n'
+LSAPP_INFO_SPOTIFY = ('"LSDisplayName"="Spotify"\n"CFBundleIdentifier"="com.spotify.client"\n'
+                      '"CFBundleExecutablePath"="/Applications/Spotify.app/Contents/MacOS/Spotify"\n')
+LSAPP_INFO_CHROME = ('"LSDisplayName"="Google Chrome"\n"CFBundleIdentifier"="com.google.Chrome"\n'
+                     '"CFBundleExecutablePath"="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"\n')
+
+LAYOUT_PER_APP = {
+    "pages": [
+        {"name": "Griglia", "slots": [
+            {"pos": [0, 0], "label": "A", "icon": "text:A", "action": {"type": "noop"}}]},
+        {"name": "Spotify", "app": "com.spotify.client", "grid": {"cols": 3, "rows": 2},
+         "slots": [
+            {"pos": [0, 0], "kind": "info", "label": "{media.title}",
+             "caption": "{media.artist}", "span": 3},
+            {"pos": [0, 1], "label": "Play", "icon": "text:P",
+             "action": {"type": "media", "op": "play_pause"}},
+            {"pos": [1, 1], "kind": "info", "label": "{volume.level}",
+             "action": {"type": "volume", "op": "mute_toggle"}},
+         ]},
+        {"name": "Altra", "slots": []},
+    ]
+}
+
+
+def _davanti(fake_ex, info, brano="Anagrafe"):
+    fake_ex.replies = {
+        "lsappinfo front": R(True, out="ASN:0x0-0x1:\n"),
+        "lsappinfo info": R(True, out=info),
+        "lsappinfo list": R(True, out=LSAPP_LIST),
+        "running_apps": R(True, out=f"Spotify\ntrue\n{brano}\nMarlene Kuntz\n"),
+        "output volume of": R(True, out="40\nfalse\n"),
+    }
+
+
+def test_con_lapp_davanti_la_sua_pagina_e_la_prima(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY)
+    probe.refresh()
+    body = client.get("/layout?page=0", headers=AUTH).json()
+    assert body["pages"] == ["Spotify", "Griglia", "Altra"]
+
+
+def test_senza_lapp_davanti_la_sua_pagina_non_ce(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_CHROME)
+    probe.refresh()
+    body = client.get("/layout?page=0", headers=AUTH).json()
+    assert body["pages"] == ["Griglia", "Altra"]
+
+
+def test_al_cambio_di_app_il_server_risponde_pagina_zero(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_CHROME)
+    probe.refresh()
+    client.get("/layout?page=0", headers=AUTH)               # ricordo: Chrome
+    body = client.get("/layout?page=1", headers=AUTH).json()  # swipe su Altra
+    assert body["page"] == 1
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY)
+    probe.refresh()
+    body = client.get("/layout?page=1", headers=AUTH).json()
+    assert body["page"] == 0 and body["pages"][0] == "Spotify"
+
+
+def test_un_brano_nuovo_non_fa_saltare_pagina(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY, brano="Uno")
+    probe.refresh()
+    client.get("/layout?page=0", headers=AUTH)
+    v1 = client.get("/layout?page=1", headers=AUTH).json()["version"]
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY, brano="Due")
+    probe.refresh()
+    body = client.get("/layout?page=1", headers=AUTH).json()
+    assert body["page"] == 1                 # resto sulla griglia
+    assert body["version"] != v1             # ma la versione e' cambiata
+
+
+def test_le_etichette_con_segnaposto_arrivano_riempite_nella_firma(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY, brano="Uno")
+    probe.refresh()
+    a = client.get("/screen/0.png", headers=AUTH).content
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY, brano="Due")
+    probe.refresh()
+    b = client.get("/screen/0.png", headers=AUTH).content
+    assert a != b
+
+
+def test_le_tile_info_senza_azione_non_sono_aree_di_tocco(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY)
+    probe.refresh()
+    body = client.get("/layout?page=0", headers=AUTH).json()
+    indici = sorted(s["i"] for s in body["slots"])
+    assert indici == [3, 4]                  # Play e la info con azione
+
+
+def test_press_su_una_info_senza_azione_e_404(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY)
+    probe.refresh()
+    client.get("/layout?page=0", headers=AUTH)
+    r = client.post("/press", headers=AUTH, json={"page": 0, "slot": 0})
+    assert r.status_code == 404
+
+
+def test_lo_span_allarga_larea_di_tocco(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save({"pages": [{"name": "P", "grid": {"cols": 3, "rows": 2}, "slots": [
+        {"pos": [0, 0], "span": 2, "label": "L", "icon": "text:L", "action": {"type": "noop"}}]}]})
+    body = client.get("/layout", headers=AUTH).json()
+    boxes = L.slot_boxes({"cols": 3, "rows": 2})
+    assert body["slots"][0]["w"] == 2 * boxes[0]["w"] + L.GUTTER
+
+
+def test_api_config_elenca_le_chiavi_di_stato(ctx):
+    client, *_ = ctx
+    keys = client.get("/api/config", headers=LOCAL).json()["state_keys"]
+    assert "media.title" in keys and "front.app" in keys and "accessibility_ok" in keys
+
+
+def test_tile_preview_riempie_i_segnaposto_e_rispetta_lo_span(ctx):
+    client, store, fake_ex, probe = ctx
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY, brano="Uno")
+    probe.refresh()
+    corpo = {"grid": {"cols": 3, "rows": 2},
+             "slot": {"pos": [0, 0], "kind": "info", "label": "{media.title}", "span": 3}}
+    a = client.post("/api/tile-preview", headers=LOCAL, json=corpo)
+    with Image.open(io.BytesIO(a.content)) as im:
+        boxes = L.slot_boxes({"cols": 3, "rows": 2})
+        assert im.size[0] == 3 * boxes[0]["w"] + 2 * L.GUTTER
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY, brano="Due")
+    probe.refresh()
+    b = client.post("/api/tile-preview", headers=LOCAL, json=corpo)
+    assert a.content != b.content
+
+
+def test_api_icons_espone_il_bundle_id(ctx):
+    client, *_ = ctx
+    apps = client.get("/api/icons", headers=LOCAL).json()["apps"]
+    if apps:                                   # dipende dal Mac che esegue i test
+        assert "bundle" in apps[0]
