@@ -2,7 +2,7 @@ import time
 
 from macdeck import sources as S
 from macdeck.executor import Result as R
-from macdeck.state import EMPTY_SNAPSHOT, StateProbe
+from macdeck.state import EMPTY_SNAPSHOT, StateProbe, fill, placeholders
 
 
 def _registro(*fns):
@@ -348,3 +348,33 @@ def test_la_sonda_riceve_il_proprio_ultimo_valore(fake_ex):
 def test_il_valore_restituito_si_fonde_sul_vuoto(fake_ex):
     reg = _registro(("x", lambda ex, ctx: {"a": 1}, {"empty": {"a": None, "b": None}}))
     assert StateProbe(fake_ex, sources=reg).refresh()["x"] == {"a": 1, "b": None}
+
+
+SNAP = {"media": {"title": "Anagrafe", "artist": None},
+        "claude": {"remaining": 38.4}, "mail": {"unread": 0}}
+
+
+def test_fill_sostituisce_i_valori():
+    assert fill("{media.title} — {mail.unread}", SNAP) == "Anagrafe — 0"
+
+
+def test_fill_valore_assente_diventa_vuoto():
+    assert fill("[{media.artist}] [{boh.niente}]", SNAP) == "[] []"
+
+
+def test_fill_filtro_int():
+    assert fill("{claude.remaining|int}%", SNAP) == "38%"
+
+
+def test_fill_filtro_int_su_non_numero_da_vuoto():
+    assert fill("{media.title|int}", SNAP) == ""
+
+
+def test_fill_senza_segnaposto_e_identita():
+    assert fill("Play / Pausa", SNAP) == "Play / Pausa"
+    assert fill("", SNAP) == ""
+
+
+def test_placeholders_elenca_le_chiavi():
+    assert placeholders("{a.b} e {c.d|int}") == ["a.b", "c.d"]
+    assert placeholders("niente") == []
