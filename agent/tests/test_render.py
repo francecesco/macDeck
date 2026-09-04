@@ -3,6 +3,7 @@ import io
 from PIL import Image
 
 from macdeck import layout as L
+from macdeck import render
 from macdeck.render import TileCache, render_tile, resolve_font, tile_png
 
 SLOT = {
@@ -116,3 +117,49 @@ def test_licona_non_sborda_mai_dalla_tile():
         for scale in (0.5, 1.0, 1.5, 3.0):
             im = render_tile(slot, {**L.DEFAULT_THEME, "icon_scale": scale})
             assert im.size == (154, h)
+
+
+BOXES = L.slot_boxes({"cols": 3, "rows": 2})
+
+
+def _info(**s):
+    return {"kind": "info", "label": "Anagrafe", "caption": "Marlene Kuntz",
+            "icon": None, "box": L.span_box(BOXES, 0, 3), **s}
+
+
+def test_info_ha_la_dimensione_del_box_allargato():
+    im = render.render_tile(_info(), L.DEFAULT_THEME)
+    assert im.size == (3 * BOXES[0]["w"] + 2 * L.GUTTER, BOXES[0]["h"])
+
+
+def test_info_disegna_qualcosa():
+    im = render.render_tile(_info(), L.DEFAULT_THEME)
+    fondo = im.getpixel((0, 0))
+    assert any(im.getpixel((x, im.height // 2)) != fondo for x in range(im.width))
+
+
+def test_info_valore_vuoto_mostra_solo_la_didascalia_senza_sollevare():
+    im_vuota = render.render_tile(_info(label=""), L.DEFAULT_THEME)
+    im_niente = render.render_tile(_info(label="", caption=""), L.DEFAULT_THEME)
+    assert im_vuota.tobytes() != im_niente.tobytes()
+
+
+def test_info_valore_lunghissimo_resta_nel_box():
+    lungo = "Un titolo di brano davvero interminabile " * 4
+    im = render.render_tile(_info(label=lungo, box=BOXES[0]), L.DEFAULT_THEME)
+    assert im.size == (BOXES[0]["w"], BOXES[0]["h"])
+
+
+def test_info_con_icona_e_diversa_da_senza():
+    con = render.render_tile(_info(icon="text:S"), L.DEFAULT_THEME)
+    senza = render.render_tile(_info(), L.DEFAULT_THEME)
+    assert con.tobytes() != senza.tobytes()
+
+
+def test_cache_distingue_kind_e_caption():
+    c = render.TileCache()
+    a = c.png({**_info(), "kind": "button", "caption": None, "icon": "text:A",
+               "label": "X"}, L.DEFAULT_THEME)
+    b = c.png({**_info(), "label": "X", "icon": "text:A"}, L.DEFAULT_THEME)
+    assert a != b
+    assert c.size == 2

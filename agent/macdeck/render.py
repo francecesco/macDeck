@@ -31,6 +31,9 @@ PAD = 4          # margine orizzontale
 PAD_V = 2        # margine verticale: stretto apposta, l'altezza e' il vincolo
                  # che limita la dimensione dell'icona
 
+INFO_MIN_PX = 12
+INFO_VALUE_RATIO = 0.45
+
 
 def resolve_font(name: str, px: int) -> ImageFont.FreeTypeFont:
     for candidate in (FONT_ALIASES.get(name), name, _FALLBACK_FONT):
@@ -70,7 +73,73 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int,
     return lines
 
 
-def render_tile(slot: dict, theme: dict, *, root: Path | None = None) -> Image.Image:
+def _dim(color: str, background: str) -> str:
+    """Il colore del testo attenuato verso lo sfondo della tile."""
+    def rgb(h: str) -> tuple[int, int, int]:
+        h = h.lstrip("#")
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    a, b = rgb(color), rgb(background)
+    return "#%02x%02x%02x" % tuple((x * 3 + y * 2) // 5 for x, y in zip(a, b))
+
+
+def _ellipsize(draw, text: str, font, max_w: int) -> str:
+    if draw.textlength(text, font=font) <= max_w:
+        return text
+    while text and draw.textlength(text + "…", font=font) > max_w:
+        text = text[:-1]
+    return text + "…"
+
+
+def render_info_tile(slot: dict, theme: dict, *, root: Path | None = None) -> Image.Image:
+    """Valore grande, didascalia piccola, icona a sinistra se c'e'.
+
+    Il valore sta su UNA riga: si parte da h*0.45 px e si scende fino a
+    INFO_MIN_PX, poi si tronca con l'ellissi. Con il valore vuoto resta la
+    didascalia: la tile non sparisce, cosi' la pagina non balla quando
+    Spotify e' in pausa.
+    """
+    box = slot["box"]
+    w, h = int(box["w"]), int(box["h"])
+    bg = slot.get("color") or theme["tile"]
+    im = Image.new("RGB", (w, h), theme["background"])
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([(0, 0), (w - 1, h - 1)], radius=CORNER, fill=bg)
+
+    x = PAD * 2
+    if slot.get("icon"):
+        icon_px = max(16, min(h // 2, 40))
+        icon = icons.resolve(slot["icon"], icon_px, root=root)
+        im.paste(icon, (x, (h - icon_px) // 2), icon)
+        x += icon_px + PAD * 2
+    avail_w = max(8, w - x - PAD * 2)
+
+    font_name = theme.get("font", "SFNS")
+    value = slot.get("label") or ""
+    caption = slot.get("caption") or ""
+    cap_px = max(9, min(13, h // 7))
+    cap_font = resolve_font(font_name, cap_px)
+    cap_h = cap_px + 2 if caption else 0
+
+    if value:
+        px = max(INFO_MIN_PX, int(h * INFO_VALUE_RATIO))
+        font = resolve_font(font_name, px)
+        while px > INFO_MIN_PX and d.textlength(value, font=font) > avail_w:
+            px -= 1
+            font = resolve_font(font_name, px)
+        text = _ellipsize(d, value, font, avail_w)
+        y = (h - (px + cap_h)) // 2
+        d.text((x, y), text, font=font, fill=theme["text"], anchor="la")
+        y += px + 2
+    else:
+        y = (h - cap_h) // 2
+
+    if caption:
+        d.text((x, y), _ellipsize(d, caption, cap_font, avail_w), font=cap_font,
+               fill=_dim(theme["text"], bg), anchor="la")
+    return im
+
+
+def render_button_tile(slot: dict, theme: dict, *, root: Path | None = None) -> Image.Image:
     box = slot["box"]
     w, h = int(box["w"]), int(box["h"])
     bg = slot.get("color") or theme["tile"]
@@ -104,6 +173,12 @@ def render_tile(slot: dict, theme: dict, *, root: Path | None = None) -> Image.I
     return im
 
 
+def render_tile(slot: dict, theme: dict, *, root: Path | None = None) -> Image.Image:
+    if slot.get("kind") == "info":
+        return render_info_tile(slot, theme, root=root)
+    return render_button_tile(slot, theme, root=root)
+
+
 def tile_png(slot: dict, theme: dict, *, root: Path | None = None) -> bytes:
     buf = io.BytesIO()
     render_tile(slot, theme, root=root).save(buf, format="PNG", optimize=True)
@@ -117,6 +192,8 @@ def _key(slot: dict, theme: dict) -> str:
             "label": slot.get("label"),
             "icon": slot.get("icon"),
             "color": slot.get("color"),
+            "kind": slot.get("kind"),
+            "caption": slot.get("caption"),
             "theme": theme,
         },
         sort_keys=True,
