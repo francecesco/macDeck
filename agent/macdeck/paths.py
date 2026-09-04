@@ -35,6 +35,11 @@ def cache_dir(root: Path | None = None) -> Path:
     return _subdir("cache", root)
 
 
+def claude_dir(root: Path | None = None) -> Path:
+    """Dove la statusLine di Claude Code lascia il suo JSON, un file per sessione."""
+    return _subdir("claude", root)
+
+
 def layout_file(root: Path | None = None) -> Path:
     return config_dir(root) / "layout.yaml"
 

@@ -1,4 +1,9 @@
-from macdeck import sources
+import json
+import os
+import time
+from pathlib import Path
+
+from macdeck import paths, sources
 from macdeck.executor import Result as R
 
 LSAPPINFO_LIST = '''\
@@ -189,3 +194,94 @@ def test_calendar_timeout_e_un_fallimento(fake_ex):
 def test_calendar_conteggio_non_numerico_fallisce(fake_ex):
     fake_ex.replies = {"every event of c": R(True, out="boh\n14:30\tX\n")}
     assert sources.calendar(fake_ex, _ctx()) is None
+
+
+# --------------------------------------------------------- Claude Code
+
+STATUS = {
+    "session_id": "abc-123",
+    "model": {"id": "claude-fable-5-1", "display_name": "Fable 5.1"},
+    "workspace": {"current_dir": str(Path.home() / "macdeck")},
+    "context_window": {"remaining_percentage": 38.4},
+}
+
+
+def _scrivi(dir_, nome, dati, eta_s=0):
+    p = dir_ / f"{nome}.json"
+    p.write_text(json.dumps(dati))
+    if eta_s:
+        t = time.time() - eta_s
+        os.utime(p, (t, t))
+    return p
+
+
+def _ctx_root(root, running=()):
+    return sources.ProbeContext(running=frozenset(running), now=0.0, root=root)
+
+
+def test_claude_vivo_legge_modello_percentuale_cartella_e_branch(fake_ex, tmp_path):
+    _scrivi(paths.claude_dir(tmp_path), "abc-123", STATUS)
+    fake_ex.replies = {
+        "pgrep": R(True, out="4242\n"),
+        "branch --show-current": R(True, out="main\n"),
+    }
+    c = sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert c == {"alive": True, "model": "Fable 5.1", "remaining": 38.4,
+                 "dir": "~/macdeck", "branch": "main", "session": "abc-123"}
+
+
+def test_claude_senza_processo_non_e_vivo_ma_i_dati_restano(fake_ex, tmp_path):
+    _scrivi(paths.claude_dir(tmp_path), "abc-123", STATUS)
+    fake_ex.replies = {"pgrep": R(False, error="exit 1"),
+                       "branch --show-current": R(True, out="main\n")}
+    c = sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert c["alive"] is False
+    assert c["model"] == "Fable 5.1"
+
+
+def test_claude_con_file_vecchio_non_e_vivo(fake_ex, tmp_path):
+    _scrivi(paths.claude_dir(tmp_path), "abc-123", STATUS, eta_s=sources.CLAUDE_STALE_S + 60)
+    fake_ex.replies = {"pgrep": R(True, out="4242\n")}
+    assert sources.claude(fake_ex, _ctx_root(tmp_path))["alive"] is False
+
+
+def test_claude_sceglie_il_file_piu_recente(fake_ex, tmp_path):
+    d = paths.claude_dir(tmp_path)
+    _scrivi(d, "vecchia", {**STATUS, "session_id": "vecchia",
+                           "model": {"display_name": "Vecchio"}}, eta_s=300)
+    _scrivi(d, "nuova", {**STATUS, "session_id": "nuova"})
+    fake_ex.replies = {"pgrep": R(True, out="1\n")}
+    assert sources.claude(fake_ex, _ctx_root(tmp_path))["session"] == "nuova"
+
+
+def test_claude_cancella_i_file_piu_vecchi_di_un_giorno(fake_ex, tmp_path):
+    d = paths.claude_dir(tmp_path)
+    stantio = _scrivi(d, "stantio", STATUS, eta_s=sources.CLAUDE_PURGE_S + 10)
+    _scrivi(d, "nuova", STATUS)
+    sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert not stantio.exists()
+
+
+def test_claude_senza_file_e_il_valore_vuoto_non_un_fallimento(fake_ex, tmp_path):
+    paths.claude_dir(tmp_path)
+    c = sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert c == {"alive": False, "model": None, "remaining": None,
+                 "dir": None, "branch": None, "session": None}
+
+
+def test_claude_file_malformato_vale_come_assente(fake_ex, tmp_path):
+    (paths.claude_dir(tmp_path) / "rotto.json").write_text("{non json")
+    c = sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert c["alive"] is False and c["model"] is None
+
+
+def test_claude_senza_branch_lascia_null(fake_ex, tmp_path):
+    _scrivi(paths.claude_dir(tmp_path), "abc-123", STATUS)
+    fake_ex.replies = {"pgrep": R(True, out="1\n"),
+                       "branch --show-current": R(False, error="not a git repository")}
+    assert sources.claude(fake_ex, _ctx_root(tmp_path))["branch"] is None
+
+
+def test_claude_non_e_vincolata_a_unapp_gui():
+    assert sources.REGISTRY["claude"].app == ()
+    assert sources.REGISTRY["claude"].every == 5.0

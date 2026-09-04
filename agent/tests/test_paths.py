@@ -39,3 +39,9 @@ def test_un_override_esplicito_vince(tmp_path):
     esplicito.parent.mkdir(parents=True)
     esplicito.write_text("api_key: xyz\n")
     assert paths.firmware_secrets(tmp_path) == esplicito
+
+
+def test_claude_dir_sta_sotto_la_config(tmp_path):
+    d = paths.claude_dir(tmp_path)
+    assert d == tmp_path / "macdeck" / "claude"
+    assert d.is_dir()

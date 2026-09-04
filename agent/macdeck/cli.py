@@ -60,7 +60,7 @@ def build_serve_app(root: Path | None = None, *, start_probe: bool = False):
     store = LayoutStore(paths.layout_file(root))
     store.load()
     token = paths.load_or_create_token(root)
-    probe = StateProbe(Executor())
+    probe = StateProbe(Executor(), root=root)
     if start_probe:
         # Le sonde girano in sfondo: /state deve costare ~1 ms, altrimenti il
         # loop del display resta bloccato a ogni poll. Non si avvia nei test.
@@ -126,7 +126,7 @@ def _doctor(args) -> int:
         print("  --   font MDI assente: esegui `macdeck fetch-fonts` "
               "se vuoi usare le icone mdi:")
 
-    stato = StateProbe(ex).refresh()
+    stato = StateProbe(ex, root=args.root).refresh()
     vol = stato["volume"]["level"]
     print(f"  {'OK' if vol is not None else 'KO'}   volume leggibile: {vol}")
     print(f"  --   media: {stato['media']['app'] or 'nessun player attivo'}")
