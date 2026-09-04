@@ -146,10 +146,6 @@ def _media_script() -> str:
 MEDIA_SCRIPT = _media_script()
 
 
-# Nota sul dominio: su macOS recente MediaRemote e' chiuso, quindi non
-# esiste un 'now playing' di sistema leggibile senza helper esterni.
-# Si interrogano i player noti. L'audio da browser non e' visibile:
-# e' un limite dichiarato, non un bug.
 @source("volume", empty={"level": None, "muted": None}, every=1.0)
 def volume(ex: Executor, ctx: ProbeContext) -> dict | None:
     r = ex.osascript(VOLUME_SCRIPT)
@@ -165,6 +161,10 @@ def volume(ex: Executor, ctx: ProbeContext) -> dict | None:
     return {"level": level, "muted": parts[1].strip().lower() == "true"}
 
 
+# Nota sul dominio: su macOS recente MediaRemote e' chiuso, quindi non
+# esiste un 'now playing' di sistema leggibile senza helper esterni.
+# Si interrogano i player noti. L'audio da browser non e' visibile:
+# e' un limite dichiarato, non un bug.
 @source("media", empty={"app": None, "playing": False, "title": None,
                         "artist": None}, every=2.0)
 def media(ex: Executor, ctx: ProbeContext) -> dict | None:

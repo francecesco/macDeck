@@ -184,3 +184,8 @@ def test_calendar_ha_cadenza_lenta_e_app_vincolata():
 def test_calendar_timeout_e_un_fallimento(fake_ex):
     fake_ex.replies = {"every event of c": R(False, error="timeout dopo 10.0s")}
     assert sources.calendar(fake_ex, _ctx()) is None
+
+
+def test_calendar_conteggio_non_numerico_fallisce(fake_ex):
+    fake_ex.replies = {"every event of c": R(True, out="boh\n14:30\tX\n")}
+    assert sources.calendar(fake_ex, _ctx()) is None
