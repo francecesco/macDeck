@@ -110,6 +110,15 @@ textarea{min-height:76px;font-family:ui-monospace,Menlo,monospace;font-size:12.5
       </div>
       <div class="hint">Colonne × righe non può superare 12: è il numero di widget
         immagine che il firmware gestisce.</div>
+      <label>App (opzionale)</label>
+      <div class="row"><input id="pgApp" placeholder="com.spotify.client, iTerm2">
+        <button class="ghost" id="pgAppPick" style="flex:0 0 auto">Scegli app…</button></div>
+      <div class="picker" id="pgAppBox" style="display:none"></div>
+      <div class="hint">La pagina compare, e il deck ci salta, quando una di queste app è
+        in primo piano. Nome, bundle id o percorso; più voci separate da virgola.
+        Vuoto = pagina base, sempre visibile.</div>
+      <label>Mostra solo se (opzionale)</label>
+      <input id="pgWhen" placeholder="claude.alive">
       <div class="actions">
         <button id="pgAdd">Aggiungi pagina</button>
         <button id="pgDel">Elimina pagina</button>
@@ -202,17 +211,25 @@ function cambiaVariante(i){
 function toRaw(res){
   return {
     schema:1, grid:res.grid, theme:res.theme,
-    pages: res.pages.map(p=>({
-      name:p.name, grid:p.grid,
-      slots: p.slots.map(s=>{
-        const o={pos:s.pos, label:s.label, icon:s.icon, action:s.action};
+    pages: res.pages.map(p=>{
+      const pg={name:p.name, grid:p.grid};
+      if(p.app && p.app.length) pg.app=p.app;      // oggi si perdeva anche when:
+      if(p.when) pg.when=p.when;
+      pg.slots = p.slots.map(s=>{
+        const o={pos:s.pos, label:s.label};
+        if(s.icon) o.icon=s.icon;
+        if(s.kind && s.kind!=='button') o.kind=s.kind;
+        if(s.caption) o.caption=s.caption;
+        if(s.span && s.span>1) o.span=s.span;
+        if(s.action) o.action=s.action;
         if(s.color) o.color=s.color;
         if(s.state) o.state=s.state;
         if(s.when) o.when=s.when;
         if(s.timeout_ms) o.timeout_ms=s.timeout_ms;
         return o;
-      })
-    }))
+      });
+      return pg;
+    })
   };
 }
 
@@ -268,7 +285,14 @@ async function render(){
   const tabs=document.getElementById('tabs'); tabs.innerHTML='';
   model.pages.forEach((pg,i)=>{
     const t=document.createElement('div');
-    t.className='tab'+(i===sel.page?' on':''); t.textContent=pg.name;
+    t.className='tab'+(i===sel.page?' on':'');
+    if(pg.app && pg.app.length){
+      const im=document.createElement('img');
+      im.width=14; im.height=14; im.style.cssText='vertical-align:-2px;margin-right:5px';
+      im.src='/api/icon-preview?spec='+encodeURIComponent('app:'+pg.app[0])+'&size=28';
+      t.appendChild(im);
+    }
+    t.appendChild(document.createTextNode(pg.name));
     t.onclick=()=>{ sel.page=i; sel.index=null; render(); };
     tabs.appendChild(t);
   });
@@ -312,6 +336,8 @@ async function render(){
   document.getElementById('pgName').value=pg.name;
   document.getElementById('pgCols').value=gridOf(pg).cols;
   document.getElementById('pgRows').value=gridOf(pg).rows;
+  document.getElementById('pgApp').value=(pg.app||[]).join(', ');
+  document.getElementById('pgWhen').value=pg.when||'';
 }
 
 // L'anteprima passa dal renderer del display: quello che vedi qui e'
@@ -369,10 +395,26 @@ function renderSlotPanel(){
 
   body.innerHTML=barra+`
     <div class="row">
-      <div><label>Etichetta</label><input id="fLabel"></div>
+      <div><label>Tipo di tile</label>
+        <select id="fKind"><option value="button">Pulsante</option>
+          <option value="info">Informativa</option></select></div>
       <div><label>Colore tile</label>
         <div class="row"><input id="fColor" type="color" style="padding:2px">
         <button class="ghost" id="fColorNo">Tema</button></div></div>
+    </div>
+    <label id="lLabel">Etichetta</label>
+    <div class="row"><input id="fLabel">
+      <select id="fIns" style="flex:0 0 auto"><option value="">Inserisci valore…</option></select></div>
+    <div class="hint" id="hKeys"></div>
+    <div id="fInfoOnly">
+      <label>Didascalia</label>
+      <input id="fCaption" placeholder="{media.artist}">
+      <div class="row">
+        <div><label>Colonne occupate</label><input id="fSpan" type="number" min="1" max="12"></div>
+      </div>
+      <div class="hint">Una tile informativa mostra il valore in grande e la didascalia sotto.
+        I segnaposto <code>{chiave}</code> leggono <code>/state</code>; <code>{chiave|int}</code>
+        toglie i decimali. L'azione è facoltativa.</div>
     </div>
     <label>Icona</label>
     <div class="row"><input id="fIcon" placeholder="app:/Applications/Slack.app">
@@ -396,7 +438,7 @@ function renderSlotPanel(){
     <div id="fFields"></div>
     <div class="actions">
       <button id="bTest">Prova adesso</button>
-      <button id="bDel">Elimina pulsante</button>
+      <button id="bDel">Elimina tile</button>
     </div>
     <div class="hint" id="tOut"></div>`;
 
@@ -407,20 +449,69 @@ function renderSlotPanel(){
   q('fWhen').value=s.when||'';
   q('fColor').value=s.color||model.theme.tile;
   if(varianti.length>1) q('fVar').onclick=()=>cambiaVariante(sel.index);
-  q('fLabel').oninput=e=>{s.label=e.target.value;setDirty(true);refreshTile();};
   q('fIcon').oninput=e=>{s.icon=e.target.value;setDirty(true);refreshTile();};
   q('fState').oninput=e=>{s.state=e.target.value||undefined;setDirty(true);};
   q('fWhen').oninput=e=>{s.when=e.target.value||undefined;setDirty(true);render();};
   q('fColor').oninput=e=>{s.color=e.target.value;setDirty(true);refreshTile();};
   q('fColorNo').onclick=()=>{delete s.color;setDirty(true);render();};
 
+  q('fKind').value=s.kind||'button';
+  q('fInfoOnly').style.display = (s.kind==='info') ? '' : 'none';
+  q('lLabel').textContent = (s.kind==='info') ? 'Valore' : 'Etichetta';
+  q('fCaption').value=s.caption||'';
+  q('fSpan').value=s.span||1;
+  q('fKind').onchange=e=>{
+    s.kind=e.target.value;
+    if(s.kind==='button'){ delete s.caption; delete s.span; if(!s.action) s.action={type:'noop'}; }
+    setDirty(true); render();
+  };
+  q('fLabel').oninput=e=>{s.label=e.target.value;setDirty(true);refreshTile();avvisaChiavi();};
+  q('fCaption').oninput=e=>{s.caption=e.target.value||undefined;setDirty(true);refreshTile();avvisaChiavi();};
+  q('fSpan').onchange=e=>{
+    const n=Math.max(1, Number(e.target.value)||1);
+    if(s.pos[0]+n>g.cols){ banner('bErr',`Da colonna ${s.pos[0]} uno span di ${n} esce dalla griglia.`); e.target.value=s.span||1; return; }
+    banner('bErr',''); s.span=n; setDirty(true); render();
+  };
+
+  // Le chiavi le conosce il registro delle sonde, non questa pagina: una
+  // sorgente nuova compare qui da sola.
+  const ins=q('fIns');
+  (cfg.state_keys||[]).forEach(k=>{
+    const o=document.createElement('option'); o.value=k; o.textContent=k; ins.appendChild(o);
+  });
+  ins.onchange=()=>{
+    if(!ins.value) return;
+    const inp=q('fLabel'), pos=inp.selectionStart??inp.value.length;
+    inp.value=inp.value.slice(0,pos)+'{'+ins.value+'}'+inp.value.slice(pos);
+    ins.value='';
+    inp.dispatchEvent(new Event('input'));
+  };
+
+  function avvisaChiavi(){
+    const note=new Set(cfg.state_keys||[]);
+    const usate=[...((s.label||'')+' '+(s.caption||'')).matchAll(/\{([A-Za-z0-9_.]+)(\|int)?\}/g)].map(m=>m[1]);
+    const ignote=usate.filter(k=>!note.has(k));
+    q('hKeys').innerHTML = ignote.length
+      ? '<span style="color:#e2b93b">Chiave sconosciuta: <code>'+ignote.join('</code>, <code>')+'</code>. '+
+        'Non è un errore, ma resterà vuota.</span>' : '';
+  }
+  avvisaChiavi();
+
   const sel2=q('fType');
+  if((s.kind||'button')==='info'){
+    const o=document.createElement('option'); o.value=''; o.textContent='— nessuna —';
+    if(!s.action) o.selected=true; sel2.appendChild(o);
+  }
   (cfg.action_types||[]).forEach(t=>{
     const o=document.createElement('option');o.value=t;o.textContent=t;
     if(s.action&&s.action.type===t)o.selected=true;sel2.appendChild(o);
   });
-  sel2.onchange=()=>{s.action={type:sel2.value};setDirty(true);renderSlotPanel();};
-  renderFields(q('fFields'), s.action);
+  sel2.onchange=()=>{
+    if(sel2.value==='') delete s.action; else s.action={type:sel2.value};
+    setDirty(true); renderSlotPanel();
+  };
+  if(s.action) renderFields(q('fFields'), s.action); else q('fFields').innerHTML='';
+  q('bTest').style.display = s.action ? '' : 'none';
 
   q('fFind').onclick=()=>openPicker(s);
   q('bDel').onclick=()=>{
@@ -669,6 +760,29 @@ document.getElementById('pgAdd').onclick=()=>{
 document.getElementById('pgDel').onclick=()=>{
   if(model.pages.length<2){ banner('bErr','Deve restare almeno una pagina.'); return; }
   model.pages.splice(sel.page,1); sel.page=0; sel.index=null; setDirty(true); render();
+};
+document.getElementById('pgApp').oninput=e=>{
+  const v=e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
+  if(v.length) curPage().app=v; else delete curPage().app;
+  setDirty(true);
+};
+document.getElementById('pgApp').onchange=()=>render();
+document.getElementById('pgWhen').oninput=e=>{
+  const v=e.target.value.trim();
+  if(v) curPage().when=v; else delete curPage().when;
+  setDirty(true);
+};
+document.getElementById('pgAppPick').onclick=()=>{
+  const box=document.getElementById('pgAppBox');
+  if(box.style.display!=='none'){ box.style.display='none'; return; }
+  box.style.display='block';
+  mostraElencoApp(box, scelta=>{
+    // Il bundle id e' il nome piu' stabile: non cambia con la lingua del Mac
+    // e non dipende da dove sta il bundle.
+    const id = scelta.bundle || scelta.path;
+    const p=curPage(); p.app=[...(p.app||[]), id];
+    box.style.display='none'; setDirty(true); render();
+  });
 };
 
 // ---------------------------------------------------------------- salva

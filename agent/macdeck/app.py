@@ -27,10 +27,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from . import actions, icons, keymap, render
 from . import layout as L
+from . import sources
 from .executor import Executor
 from .layout import LayoutStore
 from .render import TileCache
-from .state import StateProbe, value_at
+from .state import StateProbe, fill, value_at
 
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -63,22 +64,46 @@ def create_app(
             return
         raise HTTPException(status_code=403, detail="solo da localhost")
 
-    def _resolve() -> tuple[list[dict], bool]:
+    def _chiave_mazzo(risolte: list[dict]) -> tuple[str, ...]:
+        """Le pagine con `app:` presenti nel mazzo risolto, nell'ordine.
+
+        E' questo insieme, non l'app in primo piano, a dire se e' successo
+        qualcosa che giustifica un salto: due app senza nessuna pagina
+        propria (Chrome, Safari) fanno cambiare `front.bundle` ma lasciano
+        il mazzo — e quindi questa chiave — identico.
+        """
+        return tuple(q["name"] for q in risolte if q.get("app"))
+
+    def _resolve(stato: dict | None = None) -> list[dict]:
         """Cosa il display deve mostrare adesso: pagine e slot gia' risolti.
 
-        Tre cose si decidono qui, tutte dipendenti dallo stato vivo del Mac e
-        quindi impossibili da precalcolare in validate():
+        Quattro cose si decidono qui, tutte dipendenti dallo stato vivo del
+        Mac e quindi impossibili da precalcolare in validate():
 
+        - l'ORDINE del mazzo: prima le pagine la cui `app:` e' in primo
+          piano, poi quelle senza `app:`. Le pagine di app non davanti non
+          ci sono: sarebbero comandi per una finestra che non c'e';
         - quali PAGINE sono visibili (`when:` sulla pagina);
-        - quali SLOT occupano ciascuna casella (`when:` sullo slot): e' cosi'
-          che la riga in basso diventa i comandi multimediali quando c'e' un
-          player attivo, e torna alle app quando non c'e'.
+        - quali SLOT occupano ciascuna casella (`when:` sullo slot);
+        - il TESTO delle etichette: i segnaposto `{media.title}` diventano
+          il valore corrente, cosi' la firma cambia quando cambia il valore.
+
+        L'ultimo ripiego (`or store.layout["pages"]`) puo' mostrare pagine di
+        app che non sono in primo piano: il mazzo non deve mai restare vuoto.
         """
-        stato = probe.snapshot()
-        pagine = [
-            p for p in store.layout["pages"]
-            if not p.get("when") or bool(value_at(stato, p["when"]))
-        ] or store.layout["pages"]
+        if stato is None:
+            stato = probe.snapshot()
+        front = stato.get("front") or {}
+
+        def visibile(p: dict) -> bool:
+            return not p.get("when") or bool(value_at(stato, p["when"]))
+
+        davanti = [p for p in store.layout["pages"]
+                   if p.get("app") and visibile(p) and L.app_matches(p["app"], front)]
+        base = [p for p in store.layout["pages"] if not p.get("app") and visibile(p)]
+        pagine = (davanti + base) \
+            or [p for p in store.layout["pages"] if not p.get("app")] \
+            or store.layout["pages"]
 
         risolte = []
         for pagina in pagine:
@@ -92,9 +117,28 @@ def create_app(
                 prima = scelti.get(slot["index"])
                 if prima is not None and not (attivo and prima.get("when") is None):
                     continue      # a parita' di casella vince il condizionale
-                scelti[slot["index"]] = {**slot, "box": boxes[slot["index"]]}
+                scelti[slot["index"]] = {
+                    **slot,
+                    "box": L.span_box(boxes, slot["index"], slot.get("span") or 1),
+                    "label": fill(slot.get("label") or "", stato),
+                    "caption": fill(slot.get("caption") or "", stato),
+                }
             risolte.append({**pagina, "slots": [scelti[i] for i in sorted(scelti)]})
         return risolte
+
+    # Il display agisce su cio' che gli e' stato promesso: /press e /screen
+    # leggono il mazzo servito all'ultimo /layout, cosi' un cambio di app fra
+    # un poll e l'altro non puo' far eseguire l'azione di un'altra pagina.
+    # "chiave" e' l'insieme delle pagine con `app:` che c'erano nel mazzo
+    # servito all'ultimo /layout: se e' cambiato, la risposta successiva
+    # porta il display a pagina 0, dove sta la pagina dell'app nuova; se non
+    # e' cambiato, si clampa e basta. Due garanzie, non una sola: un brano
+    # nuovo non deve riportare alla pagina Spotify chi e' andato sulla
+    # griglia, e un cambio fra due app senza pagina propria (Chrome ->
+    # Safari) non deve mangiare lo swipe successivo, perche' senza pagine di
+    # app in mezzo il mazzo servito resta lo stesso anche se l'app davanti
+    # e' un'altra.
+    servito = {"chiave": (), "risolte": None, "version": None}
 
     # Le icone non stanno nel layout: vivono sul disco, dentro i bundle delle
     # app. Se cambia un'icona — o cambia il modo in cui la risolviamo — il
@@ -132,10 +176,16 @@ def create_app(
         return max(0, min(requested, len(risolte) - 1))
 
     def _slot(page_index: int, slot_index: int) -> dict:
-        risolte = _resolve()
+        # Il mazzo servito, non quello vivo: altrimenti un cambio d'app fra
+        # l'ultimo /layout e il tocco farebbe eseguire l'azione di un'altra
+        # pagina che ha uno slot alla stessa casella. Dal vivo solo se non
+        # e' ancora mai stato servito niente (nessun /layout ancora chiesto).
+        risolte = servito["risolte"] if servito["risolte"] is not None else _resolve()
         page = risolte[_page_index(page_index, risolte)]
         for slot in page["slots"]:
             if slot["index"] == slot_index:
+                if slot.get("action") is None:
+                    break             # tile informativa: niente da premere
                 return slot
         raise HTTPException(
             status_code=404,
@@ -146,11 +196,21 @@ def create_app(
 
     @app.get("/layout", dependencies=[Depends(require_token)])
     def get_layout(page: int = 0) -> dict:
-        risolte = _resolve()
-        page = _page_index(page, risolte)
+        stato = probe.snapshot()
+        risolte = _resolve(stato)
+        chiave = _chiave_mazzo(risolte)
+        if chiave != servito["chiave"]:
+            servito["chiave"] = chiave
+            page = 0 if risolte else _page_index(page, risolte)
+        else:
+            page = _page_index(page, risolte)
         p = risolte[page]
         theme = store.layout["theme"]
         version = _signature(risolte)
+        # Da qui in avanti /press, /tile e /screen(?v=) leggono QUESTO mazzo,
+        # non uno risolto di nuovo: e' la promessa fatta al display.
+        servito["risolte"] = risolte
+        servito["version"] = version
         return {
             "version": version,
             # Con una pagina sola il firmware deve nascondere le frecce.
@@ -173,6 +233,7 @@ def create_app(
                     "state": s.get("state"),
                 }
                 for s in p["slots"]
+                if s.get("action") is not None
             ],
         }
 
@@ -183,16 +244,27 @@ def create_app(
         return Response(content=png, media_type="image/png")
 
     @app.get("/screen/{page}.png", dependencies=[Depends(require_token)])
-    def get_screen(page: int) -> Response:
+    def get_screen(page: int, v: int | None = None) -> Response:
         """L'intera schermata come un unico PNG.
 
         E' cio' che il firmware scarica davvero: una richiesta invece di
         dodici. Vedi render.render_screen per il perche'.
+
+        Il display chiede sempre `?v=<versione>`, la stessa che /layout gli
+        ha dato insieme a quell'URL. Se combacia col mazzo servito, la
+        schermata viene da LI' e non da una risoluzione dal vivo che nel
+        frattempo potrebbe essere cambiata (vedi `servito`, sopra): stessa
+        garanzia di /press, per lo stesso motivo.
         """
-        risolte = _resolve()
-        page = _page_index(page, risolte)
+        if v is not None and v == servito["version"] and servito["risolte"] is not None:
+            risolte = servito["risolte"]
+            page = _page_index(page, risolte)
+            key = (page, v)
+        else:
+            risolte = _resolve()
+            page = _page_index(page, risolte)
+            key = (page, _signature(risolte))
         p = risolte[page]
-        key = (page, _signature(risolte))
         png = screens.get(key)
         if png is None:
             png = render.screen_png(
@@ -273,6 +345,7 @@ def create_app(
             "version": store.version,
             "error": store.error,
             "action_types": sorted(actions.known_types()),
+            "state_keys": sorted(sources.known_keys() + ["accessibility_ok"]),
             # Lecito qui: questo endpoint e' gia' solo-loopback. Serve alla
             # web UI per interrogare /state, che richiede il token.
             "token": token,
@@ -321,7 +394,8 @@ def create_app(
                     continue
                 seen.add(disco)
                 apps.append({"name": nome, "path": str(bundle),
-                             "disk": disco, "icon": f"app:{bundle}"})
+                             "disk": disco, "icon": f"app:{bundle}",
+                             "bundle": icons.bundle_identifier(bundle)})
         apps.sort(key=lambda a: a["name"].lower())
         mdi = [n for n in icons.mdi_names(root) if not needle or needle in n]
         return {
@@ -352,7 +426,14 @@ def create_app(
         pos = slot.get("pos") or [0, 0]
         boxes = L.slot_boxes(grid)
         index = L.slot_index(pos, grid)
-        slot["box"] = boxes.get(index) or next(iter(boxes.values()))
+        span = slot.get("span") or 1
+        if not isinstance(span, int) or span < 1 or int(pos[0]) + span > grid["cols"]:
+            span = 1
+        slot["box"] = (L.span_box(boxes, index, span) if index in boxes
+                       else next(iter(boxes.values())))
+        stato = probe.snapshot()
+        slot["label"] = fill(slot.get("label") or "", stato)
+        slot["caption"] = fill(slot.get("caption") or "", stato)
         theme = {**store.layout["theme"], **(body.get("theme") or {})}
         return Response(
             content=render.tile_png(slot, theme, root=root),

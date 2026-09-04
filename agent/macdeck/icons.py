@@ -109,7 +109,7 @@ def app_dirs() -> list[Path]:
     return [d for d in (Path(p).expanduser() for p in APP_DIRS) if d.is_dir()]
 
 
-def _bundle_identifier(bundle: Path) -> str | None:
+def bundle_identifier(bundle: Path) -> str | None:
     plist = bundle / "Contents" / "Info.plist"
     if not plist.exists():
         return None
@@ -195,7 +195,7 @@ def _locate_bundle(target: str) -> Path | None:
     if is_id:
         for folder in app_dirs():
             for bundle in folder.glob("*.app"):
-                if (_bundle_identifier(bundle) or "").lower() == target.lower():
+                if (bundle_identifier(bundle) or "").lower() == target.lower():
                     return bundle
     # il nome tradotto che mostra il Finder: "Anteprima" -> Preview.app
     for percorso, mostrato in display_names().items():

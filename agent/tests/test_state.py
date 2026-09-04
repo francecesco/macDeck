@@ -1,7 +1,26 @@
 import time
 
+from macdeck import sources as S
 from macdeck.executor import Result as R
-from macdeck.state import EMPTY_SNAPSHOT, StateProbe
+from macdeck.state import EMPTY_SNAPSHOT, StateProbe, fill, placeholders
+
+
+def _registro(*fns):
+    """Un registro isolato: i test non devono sporcare quello globale."""
+    reg = {}
+    for name, fn, kw in fns:
+        reg[name] = S.Source(name=name, fn=fn, empty=dict(kw.get("empty", {"v": None})),
+                             every=float(kw.get("every", 1.0)),
+                             app=tuple(a.lower() for a in kw.get("app", ())))
+    return reg
+
+
+class Orologio:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
 
 
 def _probe(fake_ex, **kw):
@@ -144,12 +163,22 @@ def test_start_fa_subito_una_lettura_e_avvia_il_thread(fake_ex):
 
 
 def test_il_thread_continua_ad_aggiornare(fake_ex):
-    p = _probe(fake_ex, interval=0.02)
+    # every=0: le sonde di base (cadenza 1-2 s) non farebbero in tempo a
+    # scadere in 0.2 s, quindi qui si usa una sonda con cadenza propria per
+    # verificare che il thread continui davvero a girare.
+    chiamate = {"n": 0}
+
+    def sonda(ex, ctx):
+        chiamate["n"] += 1
+        return {"v": chiamate["n"]}
+
+    reg = _registro(("x", sonda, {"every": 0.0}))
+    p = StateProbe(fake_ex, interval=0.02, sources=reg)
     try:
         p.start()
-        quante = len(fake_ex.calls)
+        quante = chiamate["n"]
         time.sleep(0.2)
-        assert len(fake_ex.calls) > quante
+        assert chiamate["n"] > quante
     finally:
         p.stop()
 
@@ -175,23 +204,18 @@ def test_start_e_idempotente(fake_ex):
         p.stop()
 
 
-def test_una_sonda_che_esplode_non_uccide_il_thread(fake_ex, monkeypatch):
-    p = _probe(fake_ex, interval=0.02)
+def test_una_sonda_che_esplode_non_uccide_il_thread(fake_ex):
     boom = {"n": 0}
 
-    def esplode():
+    def esplode(ex, ctx):
         boom["n"] += 1
         raise RuntimeError("sonda rotta")
 
-    monkeypatch.setattr(p, "_volume", esplode)
-    try:
-        p.start()
-    except RuntimeError:
-        pass
-    p._stop.clear()
-    p._thread = None
-    p._thread = __import__("threading").Thread(target=p._loop, daemon=True)
-    p._thread.start()
+    # every=0: deve girare a OGNI giro del thread, altrimenti con la cadenza
+    # di default (1 s) esploderebbe una volta sola in 0.15 s.
+    reg = _registro(("rotta", esplode, {"every": 0.0}))
+    p = StateProbe(fake_ex, interval=0.02, sources=reg)
+    p.start()
     time.sleep(0.15)
     assert p._thread.is_alive()
     assert boom["n"] > 1
@@ -229,3 +253,136 @@ def test_dopo_un_diniego_un_successo_lo_annulla(fake_ex):
     assert p.refresh()["accessibility_ok"] is False
     fake_ex.replies = {"first process": R(True, out="Finder\n")}
     assert p.refresh()["accessibility_ok"] is True
+
+
+# ------------------------------------------------- registro delle sonde
+
+
+def test_una_sonda_con_app_non_gira_se_lapp_e_chiusa(fake_ex):
+    chiamate = {"n": 0}
+
+    def sonda(ex, ctx):
+        chiamate["n"] += 1
+        return {"v": 1}
+
+    reg = _registro(("mail", sonda, {"app": ("com.apple.mail",)}))
+    snap = StateProbe(fake_ex, sources=reg).refresh()
+    assert chiamate["n"] == 0
+    assert snap["mail"] == {"v": None}
+
+
+def test_una_sonda_con_app_gira_se_lapp_e_aperta(fake_ex):
+    fake_ex.replies = {"lsappinfo list": R(True, out=' 1) "Mail" ASN:0x0-0x1:\n    bundleID="com.apple.mail"\n')}
+
+    def sonda(ex, ctx):
+        assert "com.apple.mail" in ctx.running
+        return {"v": 7}
+
+    reg = _registro(("mail", sonda, {"app": ("com.apple.mail",)}))
+    assert StateProbe(fake_ex, sources=reg).refresh()["mail"] == {"v": 7}
+
+
+def test_la_cadenza_viene_rispettata_solo_con_due_only(fake_ex):
+    chiamate = {"n": 0}
+
+    def sonda(ex, ctx):
+        chiamate["n"] += 1
+        return {"v": chiamate["n"]}
+
+    clock = Orologio()
+    reg = _registro(("lenta", sonda, {"every": 5.0}))
+    p = StateProbe(fake_ex, sources=reg, clock=clock)
+    p.refresh(due_only=True)
+    clock.t += 1.0
+    p.refresh(due_only=True)
+    assert chiamate["n"] == 1            # non e' ancora il suo turno
+    clock.t += 4.5
+    p.refresh(due_only=True)
+    assert chiamate["n"] == 2
+    p.refresh()                          # senza due_only gira sempre
+    assert chiamate["n"] == 3
+
+
+def test_un_fallimento_tiene_lultimo_valore_noto(fake_ex):
+    esiti = iter([{"v": 3}, None, None])
+    reg = _registro(("x", lambda ex, ctx: next(esiti), {}))
+    p = StateProbe(fake_ex, sources=reg)
+    assert p.refresh()["x"] == {"v": 3}
+    assert p.refresh()["x"] == {"v": 3}
+    assert p.refresh()["x"] == {"v": 3}
+
+
+def test_tre_fallimenti_consecutivi_riportano_al_vuoto(fake_ex):
+    esiti = iter([{"v": 3}, None, None, None])
+    reg = _registro(("x", lambda ex, ctx: next(esiti), {}))
+    p = StateProbe(fake_ex, sources=reg)
+    for _ in range(4):
+        snap = p.refresh()
+    assert snap["x"] == {"v": None}
+
+
+def test_uneccezione_nella_sonda_vale_come_fallimento(fake_ex):
+    def esplode(ex, ctx):
+        raise RuntimeError("rotta")
+
+    reg = _registro(("x", esplode, {}))
+    snap = StateProbe(fake_ex, sources=reg).refresh()
+    assert snap["x"] == {"v": None}
+
+
+def test_la_sonda_riceve_il_proprio_ultimo_valore(fake_ex):
+    visti = []
+
+    def sonda(ex, ctx):
+        visti.append(dict(ctx.last))
+        return {"v": len(visti)}
+
+    reg = _registro(("x", sonda, {}))
+    p = StateProbe(fake_ex, sources=reg)
+    p.refresh()
+    p.refresh()
+    assert visti[0] == {"v": None}
+    assert visti[1] == {"v": 1}
+
+
+def test_il_valore_restituito_si_fonde_sul_vuoto(fake_ex):
+    reg = _registro(("x", lambda ex, ctx: {"a": 1}, {"empty": {"a": None, "b": None}}))
+    assert StateProbe(fake_ex, sources=reg).refresh()["x"] == {"a": 1, "b": None}
+
+
+SNAP = {"media": {"title": "Anagrafe", "artist": None},
+        "claude": {"remaining": 38.4}, "mail": {"unread": 0}}
+
+
+def test_fill_sostituisce_i_valori():
+    assert fill("{media.title} — {mail.unread}", SNAP) == "Anagrafe — 0"
+
+
+def test_fill_valore_assente_diventa_vuoto():
+    assert fill("[{media.artist}] [{boh.niente}]", SNAP) == "[] []"
+
+
+def test_fill_filtro_int():
+    assert fill("{claude.remaining|int}%", SNAP) == "38%"
+
+
+def test_fill_filtro_int_su_non_numero_da_vuoto():
+    assert fill("{media.title|int}", SNAP) == ""
+
+
+def test_fill_senza_segnaposto_e_identita():
+    assert fill("Play / Pausa", SNAP) == "Play / Pausa"
+    assert fill("", SNAP) == ""
+
+
+def test_placeholders_elenca_le_chiavi():
+    assert placeholders("{a.b} e {c.d|int}") == ["a.b", "c.d"]
+    assert placeholders("niente") == []
+
+
+def test_fill_accetta_una_chiave_senza_punto():
+    assert fill("{accessibility_ok}", {"accessibility_ok": True}) == "True"
+
+
+def test_placeholders_accetta_una_chiave_senza_punto():
+    assert placeholders("{accessibility_ok} {a.b}") == ["accessibility_ok", "a.b"]

@@ -105,6 +105,98 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                  "action": {"type": "media", "op": "next"}},
             ],
         },
+
+        # --- pagine per app: compaiono, e il deck ci salta, quando l'app e'
+        #     in primo piano. Le scorciatoie sono quelle di default delle
+        #     app: si correggono dalla GUI se una versione le cambia.
+        {
+            "name": "Spotify",
+            "app": "com.spotify.client",
+            "grid": {"cols": 3, "rows": 2},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "span": 3, "icon": "mdi:music",
+                 "label": "{media.title}", "caption": "{media.artist}"},
+                {"pos": [0, 1], "label": "Indietro", "icon": "mdi:skip-previous",
+                 "action": {"type": "media", "op": "prev"}},
+                {"pos": [1, 1], "label": "Play / Pausa", "icon": "mdi:play-pause",
+                 "action": {"type": "media", "op": "play_pause"}},
+                {"pos": [2, 1], "label": "Avanti", "icon": "mdi:skip-next",
+                 "action": {"type": "media", "op": "next"}},
+            ],
+        },
+        {
+            "name": "Mail",
+            "app": "com.apple.mail",
+            "grid": {"cols": 3, "rows": 2},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "span": 3, "icon": "mdi:email",
+                 "label": "{mail.unread}", "caption": "da leggere"},
+                {"pos": [0, 1], "label": "Nuovo", "icon": "mdi:email-plus",
+                 "action": {"type": "keys", "keys": "cmd+n"}},
+                {"pos": [1, 1], "label": "Rispondi", "icon": "mdi:reply",
+                 "action": {"type": "keys", "keys": "cmd+r"}},
+                {"pos": [2, 1], "label": "Archivia", "icon": "mdi:archive-arrow-down",
+                 "action": {"type": "keys", "keys": "ctrl+cmd+a"}},
+            ],
+        },
+        {
+            "name": "Claude Code",
+            "app": ["com.googlecode.iterm2", "com.apple.Terminal"],
+            "when": "claude.alive",
+            "grid": {"cols": 3, "rows": 3},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "icon": "mdi:robot-outline",
+                 "label": "{claude.model}", "caption": "modello"},
+                {"pos": [1, 0], "kind": "info", "icon": "mdi:gauge",
+                 "label": "{claude.remaining|int}%", "caption": "contesto rimanente"},
+                {"pos": [2, 0], "kind": "info", "icon": "mdi:folder-outline",
+                 "label": "{claude.dir}", "caption": "{claude.branch}"},
+                {"pos": [0, 1], "label": "Esc", "icon": "mdi:keyboard-esc",
+                 "action": {"type": "keys", "keys": "escape"}},
+                {"pos": [1, 1], "label": "Invio", "icon": "mdi:keyboard-return",
+                 "action": {"type": "keys", "keys": "return"}},
+                {"pos": [2, 1], "label": "Modalità", "icon": "mdi:swap-horizontal",
+                 "action": {"type": "keys", "keys": "shift+tab"}},
+                {"pos": [0, 2], "label": "/compact", "icon": "mdi:arrow-collapse",
+                 "action": {"type": "sequence", "steps": [
+                     {"type": "text", "text": "/compact"},
+                     {"type": "keys", "keys": "return"}]}},
+                {"pos": [1, 2], "label": "/clear", "icon": "mdi:broom",
+                 "action": {"type": "sequence", "steps": [
+                     {"type": "text", "text": "/clear"},
+                     {"type": "keys", "keys": "return"}]}},
+            ],
+        },
+        {
+            "name": "Slack",
+            "app": "com.tinyspeck.slackmacgap",
+            "grid": {"cols": 3, "rows": 2},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "span": 3, "icon": "mdi:slack",
+                 "label": "{slack.badge}", "caption": "non letti"},
+                {"pos": [0, 1], "label": "Non letti", "icon": "mdi:email-mark-as-unread",
+                 "action": {"type": "keys", "keys": "shift+cmd+a"}},
+                {"pos": [1, 1], "label": "Cerca", "icon": "mdi:magnify",
+                 "action": {"type": "keys", "keys": "cmd+k"}},
+                {"pos": [2, 1], "label": "Thread", "icon": "mdi:forum",
+                 "action": {"type": "keys", "keys": "shift+cmd+t"}},
+            ],
+        },
+        {
+            "name": "Calendar",
+            "app": "com.apple.iCal",
+            "grid": {"cols": 3, "rows": 2},
+            "slots": [
+                {"pos": [0, 0], "kind": "info", "span": 3, "icon": "mdi:calendar-clock",
+                 "label": "{calendar.next}", "caption": "{calendar.next_at}"},
+                {"pos": [0, 1], "label": "Oggi", "icon": "mdi:calendar-today",
+                 "action": {"type": "keys", "keys": "cmd+t"}},
+                {"pos": [1, 1], "label": "Settimana", "icon": "mdi:calendar-week",
+                 "action": {"type": "keys", "keys": "cmd+2"}},
+                {"pos": [2, 1], "label": "Nuovo", "icon": "mdi:calendar-plus",
+                 "action": {"type": "keys", "keys": "cmd+n"}},
+            ],
+        },
     ],
 }
 
@@ -146,6 +238,48 @@ def slot_boxes(grid: dict) -> dict[int, dict]:
 def slot_index(pos: list[int], grid: dict) -> int:
     col, row = int(pos[0]), int(pos[1])
     return row * int(grid["cols"]) + col
+
+
+def span_box(boxes: dict[int, dict], index: int, span: int) -> dict:
+    """Il rettangolo di uno slot che occupa `span` colonne a partire da `index`."""
+    b = boxes[index]
+    if span <= 1:
+        return dict(b)
+    return {**b, "w": span * b["w"] + (span - 1) * GUTTER}
+
+
+def normalize_app(value) -> list[str]:
+    """`app:` accetta nome, bundle id o percorso, singolo o in lista.
+
+    Si riduce tutto a minuscolo, e un percorso al solo nome del bundle senza
+    `.app`, cosi' "/Applications/iTerm.app" e "iTerm" sono la stessa cosa.
+    """
+    items = value if isinstance(value, list) else [value]
+    out = []
+    for item in items:
+        if not isinstance(item, str) or not item.strip():
+            raise LayoutError("'app' deve essere una stringa o una lista di stringhe")
+        s = item.strip()
+        if "/" in s:
+            s = s.rstrip("/").rsplit("/", 1)[-1]
+        s = s.removesuffix(".app").lower()
+        out.append(s)
+    return out
+
+
+def app_matches(apps: list[str] | None, front: dict | None) -> bool:
+    """Vero se l'app davanti corrisponde a una voce di `app:`.
+
+    Tre nomi perche' non coincidono (iTerm2 / iTerm / com.googlecode.iterm2):
+    qualunque dei tre basta.
+    """
+    if not apps or not front:
+        return False
+    nomi = {
+        str(v).lower() for v in (front.get("app"), front.get("name"), front.get("bundle"))
+        if v
+    }
+    return any(a in nomi for a in apps)
 
 
 def normalize_grid(grid: dict, where: str = "griglia") -> dict:
@@ -221,6 +355,11 @@ def validate(raw: dict) -> dict:
         when = page.get("when")
         if when is not None and not isinstance(when, str):
             raise LayoutError(f"{where_page}: 'when' deve essere una stringa")
+        app_raw = page.get("app")
+        try:
+            app = normalize_app(app_raw) if app_raw is not None else None
+        except LayoutError as e:
+            raise LayoutError(f"{where_page}: {e}") from e
         page_grid = _check_grid(page.get("grid") or grid, f"{where_page}, griglia")
 
         slots = []
@@ -247,34 +386,67 @@ def validate(raw: dict) -> dict:
                 raise LayoutError(
                     f"{where_page}, slot {list(pos)}: 'when' deve essere una stringa"
                 )
+            where_slot = f"{where_page}, slot {list(pos)}"
+
+            kind = slot.get("kind", "button")
+            if kind not in ("button", "info"):
+                raise LayoutError(f"{where_slot}: 'kind' deve essere button o info, non {kind!r}")
+            caption = slot.get("caption")
+            if caption is not None and not isinstance(caption, str):
+                raise LayoutError(f"{where_slot}: 'caption' deve essere una stringa")
+            span = slot.get("span", 1)
+            if isinstance(span, bool) or not isinstance(span, int) or span < 1:
+                raise LayoutError(f"{where_slot}: 'span' deve essere un intero >= 1")
+            if col + span > page_grid["cols"]:
+                raise LayoutError(
+                    f"{where_slot}: span {span} esce dalla griglia "
+                    f"{page_grid['cols']}x{page_grid['rows']}"
+                )
+            coperte = range(index, index + span)
+
             # Piu' slot possono condividere una posizione, purche' al massimo
             # uno sia incondizionato: e' cosi' che la riga in basso diventa i
             # comandi multimediali quando un player e' attivo, e torna alle
             # app quando non lo e'. Due slot incondizionati sulla stessa
-            # casella sarebbero invece un errore di battitura.
+            # casella sarebbero invece un errore di battitura. Le caselle
+            # coperte da uno span contano come occupate.
             if slot_when is None:
-                if index in occupati:
-                    raise LayoutError(
-                        f"{where_page}: slot {list(pos)} occupato da "
-                        f"{occupati[index]!r} e nessuno dei due ha 'when'"
-                    )
-                occupati[index] = slot.get("label", "")
-            label = slot.get("label", "")
-            where_slot = f"{where_page}, slot {list(pos)}"
+                for i in coperte:
+                    if i in occupati:
+                        raise LayoutError(
+                            f"{where_page}: slot {list(pos)} occupato da "
+                            f"{occupati[i]!r} e nessuno dei due ha 'when'"
+                        )
+                for i in coperte:
+                    occupati[i] = slot.get("label", "")
+
+            action_raw = slot.get("action")
+            if action_raw is None and kind == "info":
+                action = None
+            else:
+                action = _check_action(action_raw, where_slot)
+
+            icon = slot.get("icon")
+            if not icon and kind == "button":
+                icon = "text:?"
+
             slots.append(
                 {
                     "pos": [col, row],
                     "index": index,
                     "when": slot_when,
-                    "label": label,
-                    "icon": slot.get("icon") or "text:?",
+                    "kind": kind,
+                    "label": slot.get("label", ""),
+                    "caption": caption,
+                    "span": span,
+                    "icon": icon or None,
                     "color": slot.get("color"),
                     "state": slot.get("state"),
                     "timeout_ms": slot.get("timeout_ms"),
-                    "action": _check_action(slot.get("action"), where_slot),
+                    "action": action,
                 }
             )
-        pages.append({"name": name, "grid": page_grid, "when": when,
+        pages.append({"name": name, "grid": page_grid, "when": when, "app": app,
                       "slots": slots})
 
     return {"schema": 1, "grid": grid, "theme": theme, "pages": pages}

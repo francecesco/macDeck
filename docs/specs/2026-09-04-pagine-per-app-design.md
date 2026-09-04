@@ -239,16 +239,18 @@ piedi»); il server, oltre a clampare l'indice, ora può **sceglierlo**.
   del file; poi le pagine senza `app:` visibili, nell'ordine del file. Le pagine
   con `app:` di app *non* davanti non ci sono: non si raggiungono con lo swipe,
   perché sarebbero comandi per una finestra che non c'è.
-- **Il salto.** Il server ricorda l'app davanti all'ultimo `/layout` servito
-  (`front.bundle`, o `front.app` se il bundle manca). Se è cambiata, risponde
+- **Il salto.** Il server ricorda quali pagine con `app:` c'erano nel mazzo
+  servito all'ultimo `/layout`. Se l'insieme è cambiato, risponde
   `page: 0` qualunque indice il display abbia chiesto, e aggiorna il ricordo.
-  Se non è cambiata, clampa come oggi. Conseguenze:
+  Se non è cambiato, clampa come oggi. Conseguenze:
   - apri Mail → il mazzo cambia → la versione cambia → il display chiede
     `/layout?page=<sua>` → il server risponde `0` → il display adotta;
   - cambia il brano mentre sei sulla griglia → la versione cambia (etichetta)
     ma l'app davanti no → resti sulla griglia;
   - passi da Chrome a Safari → nessuna pagina in gioco, il mazzo non cambia,
-    nessuna richiesta.
+    nessuna richiesta;
+  - passi da Chrome a Safari con un'altra pagina base aperta → il mazzo non
+    cambia, il ricordo non cambia, lo swipe successivo funziona.
 - **Coerenza fra `/layout`, `/screen`, `/press`.** Tutti risolvono lo stesso
   mazzo dallo stesso snapshot, come già ora. La finestra di gara fra `/layout`
   e il download dello schermo esiste già ed è coperta dal giro successivo di

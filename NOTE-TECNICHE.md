@@ -706,11 +706,69 @@ cache delle tile e azzera quella dei nomi visualizzati. Nella GUI è il
 pulsante "Ridisegna il display". Serve anche dopo aver aggiornato un'app che
 ha cambiato icona.
 
+### L'app davanti si legge con `lsappinfo`, non con System Events
+
+`tell application "System Events" to get name of first process whose frontmost
+is true` costa ~300 ms e passa dal permesso Accessibilità. `lsappinfo front` +
+`lsappinfo info -only name,bundleid,executablepath <ASN>` costa ~10 ms e non
+chiede nulla. Restituisce tre nomi che **non coincidono**: eseguibile
+(`iTerm2`), nome visibile (`iTerm`, ma `Calendario` su un Mac in italiano),
+bundle id (`com.googlecode.iterm2`). `app:` nel layout accetta uno qualunque
+dei tre; per il gate «app in esecuzione» delle sonde si usa il bundle id, che
+non dipende dalla lingua.
+
+### Una sonda non deve mai aprire un'app
+
+`tell application "Mail" to …` **lancia Mail** se è chiuso. Per questo le sonde
+dichiarano `app=` e `StateProbe` le esegue solo se `lsappinfo list` riporta
+quell'app. `media` non lo dichiara perché il suo script controlla da sé
+l'elenco dei processi prima di parlare al player.
+
+### Il server sceglie la pagina, il firmware non lo sa
+
+Il campo `page` di `/layout` era già autoritativo (il display lo adotta quando
+la pagina corrente sparisce). Per far saltare il deck alla pagina dell'app
+davanti non serve altro: il server ricorda quali pagine con `app:` c'erano nel
+mazzo che ha servito l'ultima volta e, se quell'insieme è cambiato, risponde
+`0`. Se non è cambiato, clampa e basta — altrimenti un brano nuovo
+riporterebbe alla pagina Spotify chi era andato sulla griglia. Il ricordo è
+sul mazzo, non sull'app davanti, perché un cambio fra due app senza pagina
+(Chrome → Safari) non cambia il mazzo e non deve mangiare lo swipe
+successivo. Il ricordo si aggiorna **solo** in `/layout`: `/screen` e
+`/press` non lo toccano.
+
+### I segnaposto si risolvono in `_resolve()`, non nel renderer
+
+`{media.title}` diventa testo prima del rendering. Così il renderer non
+conosce lo stato, la cache delle tile funziona per chiave d'etichetta come
+prima, e la firma del layout — che è già l'impronta del risultato risolto —
+cambia da sola quando cambia un valore. Nessun codice per «invalidare quando
+cambia il brano»: è gratis per costruzione.
+
+### `toRaw` nella GUI perdeva `when:` di pagina
+
+La funzione che riconverte il layout risolto in YAML da salvare elencava i
+campi a mano e non includeva `when` sulle pagine: salvare dalla GUI cancellava
+la condizione. Ora elenca anche `app`, `when`, `kind`, `caption`, `span`, e
+omette `action` se manca. Regola: ogni campo nuovo di `validate()` va aggiunto
+anche lì, o la GUI lo cancella in silenzio.
+
+### Il display agisce su quello che gli è stato promesso
+
+`/press` e `/screen?v=` non risolvono il mazzo dal vivo: leggono quello
+servito all'ultimo `/layout`, tenuto in memoria dal server. Senza questa
+garanzia, nella finestra fino a 2 s fra un cambio di app e il prossimo poll
+del display, un tocco eseguirebbe l'azione di un'altra pagina alla stessa
+casella — riprodotto prima della correzione. `/state` resta invece calcolato
+dal vivo: `layout_version` cambia comunque, così il display impara lo stesso
+che il mazzo è cambiato e al giro successivo chiede un nuovo `/layout`. Il
+ricordo si scrive **solo** in `/layout`.
+
 ## Comandi utili
 
 ```bash
 cd agent
-.venv/bin/python -m pytest                        # 265 test, nessun hardware
+.venv/bin/python -m pytest                        # 408 test (1 skipped), nessun hardware
 .venv/bin/python -m macdeck.cli doctor            # permessi e configurazione
 .venv/bin/python -m macdeck.cli token             # token da mettere nei secrets
 .venv/bin/python -m macdeck.cli pair              # insegna al deck la rete di adesso

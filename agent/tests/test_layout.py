@@ -240,3 +240,148 @@ def test_when_non_stringa_viene_rifiutato():
     with pytest.raises(L.LayoutError) as e:
         L.validate({"pages": [{"name": "X", "when": 42, "slots": []}]})
     assert "when" in str(e.value)
+
+
+# ------------------------------------------------------------- pagine per app
+
+def _pagina(**extra):
+    return {"pages": [{"name": "P", "slots": [], **extra}]}
+
+
+def test_app_stringa_diventa_lista_minuscola():
+    out = L.validate(_pagina(app="Spotify"))
+    assert out["pages"][0]["app"] == ["spotify"]
+
+
+def test_app_lista_e_percorsi_si_normalizzano():
+    out = L.validate(_pagina(app=["/Applications/iTerm.app", "com.apple.Terminal"]))
+    assert out["pages"][0]["app"] == ["iterm", "com.apple.terminal"]
+
+
+def test_pagina_senza_app_ha_app_none():
+    assert L.validate(_pagina())["pages"][0]["app"] is None
+
+
+def test_app_di_tipo_sbagliato_viene_rifiutato():
+    with pytest.raises(L.LayoutError) as e:
+        L.validate(_pagina(app=42))
+    assert "app" in str(e.value)
+
+
+def test_app_matches_su_uno_dei_tre_nomi():
+    front = {"app": "iTerm2", "name": "iTerm", "bundle": "com.googlecode.iterm2"}
+    assert L.app_matches(["iterm"], front)
+    assert L.app_matches(["iterm2"], front)
+    assert L.app_matches(["com.googlecode.iterm2"], front)
+    assert not L.app_matches(["terminal"], front)
+    assert not L.app_matches(["iterm"], {"app": None, "name": None, "bundle": None})
+
+
+# ------------------------------------------------------------ tile informative
+
+def _slot(**s):
+    base = {"pos": [0, 0], "label": "x", "icon": "text:x", "action": {"type": "noop"}}
+    return {"pages": [{"name": "P", "slots": [{**base, **s}]}]}
+
+
+def test_kind_manca_vale_button_e_span_uno():
+    s = L.validate(_slot())["pages"][0]["slots"][0]
+    assert s["kind"] == "button" and s["span"] == 1 and s["caption"] is None
+
+
+def test_info_senza_azione_e_lecita():
+    raw = _slot(kind="info", caption="{media.artist}")
+    del raw["pages"][0]["slots"][0]["action"]
+    s = L.validate(raw)["pages"][0]["slots"][0]
+    assert s["kind"] == "info" and s["action"] is None
+    assert s["caption"] == "{media.artist}"
+
+
+def test_info_senza_icona_non_riceve_il_punto_di_domanda():
+    raw = _slot(kind="info")
+    del raw["pages"][0]["slots"][0]["icon"]
+    assert L.validate(raw)["pages"][0]["slots"][0]["icon"] is None
+
+
+def test_button_senza_azione_resta_un_errore():
+    raw = _slot()
+    del raw["pages"][0]["slots"][0]["action"]
+    with pytest.raises(L.LayoutError):
+        L.validate(raw)
+
+
+def test_kind_ignoto_viene_rifiutato():
+    with pytest.raises(L.LayoutError) as e:
+        L.validate(_slot(kind="banner"))
+    assert "kind" in str(e.value)
+
+
+def test_span_che_esce_dalla_griglia_viene_rifiutato():
+    with pytest.raises(L.LayoutError) as e:
+        L.validate(_slot(pos=[2, 0], span=2))
+    assert "span" in str(e.value)
+
+
+def test_span_occupa_le_caselle_coperte():
+    raw = _slot(span=2)
+    raw["pages"][0]["slots"].append(
+        {"pos": [1, 0], "label": "y", "icon": "text:y", "action": {"type": "noop"}})
+    with pytest.raises(L.LayoutError) as e:
+        L.validate(raw)
+    assert "occupat" in str(e.value)
+
+
+def test_span_non_intero_o_zero_viene_rifiutato():
+    for cattivo in (0, "2", 1.5):
+        with pytest.raises(L.LayoutError):
+            L.validate(_slot(span=cattivo))
+
+
+def test_span_box_allarga_di_span_colonne():
+    boxes = L.slot_boxes({"cols": 3, "rows": 2})
+    b = L.span_box(boxes, 0, 3)
+    assert b["x"] == boxes[0]["x"] and b["y"] == boxes[0]["y"]
+    assert b["w"] == 3 * boxes[0]["w"] + 2 * L.GUTTER
+    assert L.span_box(boxes, 4, 1) == boxes[4]
+
+
+def test_i_layout_di_ieri_validano_uguali():
+    """Le pagine senza app: (quelle di ieri) devono validare come prima:
+    tutti pulsanti, span 1, azione presente."""
+    out = L.validate(L.DEFAULT_LAYOUT)
+    for p in out["pages"]:
+        if p["app"]:
+            continue
+        for s in p["slots"]:
+            assert s["kind"] == "button" and s["span"] == 1
+            assert s["action"] is not None
+
+
+def test_il_default_ha_le_cinque_pagine_per_app():
+    out = L.validate(L.DEFAULT_LAYOUT)
+    per_app = {p["name"]: p["app"] for p in out["pages"] if p["app"]}
+    assert set(per_app) == {"Spotify", "Mail", "Claude Code", "Slack", "Calendar"}
+    assert per_app["Claude Code"] == ["com.googlecode.iterm2", "com.apple.terminal"]
+    claude = next(p for p in out["pages"] if p["name"] == "Claude Code")
+    assert claude["when"] == "claude.alive"
+
+
+def test_le_pagine_per_app_hanno_almeno_una_tile_info_con_segnaposto():
+    from macdeck.state import placeholders
+    out = L.validate(L.DEFAULT_LAYOUT)
+    for p in out["pages"]:
+        if not p["app"]:
+            continue
+        info = [s for s in p["slots"] if s["kind"] == "info"]
+        assert info, p["name"]
+        assert any(placeholders(s["label"]) for s in info), p["name"]
+
+
+def test_i_segnaposto_del_default_esistono_nel_registro():
+    from macdeck import sources
+    from macdeck.state import placeholders
+    note = set(sources.known_keys())
+    for p in L.validate(L.DEFAULT_LAYOUT)["pages"]:
+        for s in p["slots"]:
+            for k in placeholders(s["label"] or "") + placeholders(s["caption"] or ""):
+                assert k in note, f"{p['name']}: {k}"

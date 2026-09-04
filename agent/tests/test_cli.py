@@ -1,4 +1,8 @@
-from macdeck import cli
+import json
+import os
+import time
+
+from macdeck import cli, paths
 
 
 def test_render_plist_contiene_label_interprete_e_keepalive():
@@ -76,3 +80,49 @@ def test_pair_via_wifi_dice_che_il_portale_non_esiste_piu(tmp_path, capsys):
     assert rc == 1
     assert "--usb" in out
     assert "portale" in out.lower()
+
+
+# ---------------------------------------------------- ponte con Claude Code
+
+
+def test_ponte_claude_assente_spiega_la_riga_da_aggiungere(tmp_path):
+    ok, msg = cli.claude_bridge_status(tmp_path)
+    assert ok is False
+    assert "statusLine" in msg and "macdeck/claude" in msg
+
+
+def test_ponte_claude_fresco_e_ok(tmp_path):
+    (paths.claude_dir(tmp_path) / "s.json").write_text(json.dumps({"session_id": "s"}))
+    ok, msg = cli.claude_bridge_status(tmp_path)
+    assert ok is True and "s.json" in msg
+
+
+def test_ponte_claude_stantio_non_e_ok(tmp_path):
+    f = paths.claude_dir(tmp_path) / "s.json"
+    f.write_text("{}")
+    t = time.time() - 3 * 3600
+    os.utime(f, (t, t))
+    ok, msg = cli.claude_bridge_status(tmp_path)
+    assert ok is False and "ore" in msg
+
+
+def test_ponte_claude_file_sparito_fra_glob_e_stat_non_esplode(tmp_path, monkeypatch):
+    # Il file trovato dal glob puo' sparire (rotazione, pulizia) prima dello
+    # stat(): non deve uscire un OSError non gestito da `doctor`.
+    from macdeck import sources
+    fantasma = paths.claude_dir(tmp_path) / "sparito.json"
+    monkeypatch.setattr(sources, "newest_claude_file", lambda d: fantasma)
+    ok, msg = cli.claude_bridge_status(tmp_path)
+    assert ok is False and "statusLine" in msg and "macdeck/claude" in msg
+
+
+def test_pagine_con_app_assente_segnala_solo_le_introvabili(monkeypatch):
+    from macdeck import layout as L
+    monkeypatch.setattr(cli.icons, "locate_bundle",
+                        lambda t: "/x/Spotify.app" if "spotify" in t else None)
+    layout = L.validate({"pages": [
+        {"name": "Griglia", "slots": []},
+        {"name": "Spotify", "app": "com.spotify.client", "slots": []},
+        {"name": "Boh", "app": ["Inesistente"], "slots": []},
+    ]})
+    assert cli.pagine_con_app_assente(layout) == [("Boh", "inesistente")]

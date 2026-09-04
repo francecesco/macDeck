@@ -60,7 +60,7 @@ def build_serve_app(root: Path | None = None, *, start_probe: bool = False):
     store = LayoutStore(paths.layout_file(root))
     store.load()
     token = paths.load_or_create_token(root)
-    probe = StateProbe(Executor())
+    probe = StateProbe(Executor(), root=root)
     if start_probe:
         # Le sonde girano in sfondo: /state deve costare ~1 ms, altrimenti il
         # loop del display resta bloccato a ogni poll. Non si avvia nei test.
@@ -93,6 +93,47 @@ def _serve(args) -> int:
     return 0
 
 
+CLAUDE_STATUSLINE_SNIPPET = (
+    'input=$(cat); mkdir -p ~/.config/macdeck/claude; '
+    'printf \'%s\' "$input" > ~/.config/macdeck/claude/'
+    '$(echo "$input" | jq -r .session_id).json; # ...poi il resto del comando'
+)
+
+
+def claude_bridge_status(root: Path | None) -> tuple[bool, str]:
+    """Se la statusLine di Claude Code sta lasciando i suoi file."""
+    from .sources import CLAUDE_STALE_S, newest_claude_file
+    f = newest_claude_file(paths.claude_dir(root))
+    if f is None:
+        return False, (
+            "ponte Claude Code assente: nessun file in ~/.config/macdeck/claude.\n"
+            "       Aggiungi in testa al comando statusLine di ~/.claude/settings.json:\n"
+            f"       {CLAUDE_STATUSLINE_SNIPPET}"
+        )
+    try:
+        mtime = f.stat().st_mtime
+    except OSError:
+        return False, (
+            "ponte Claude Code assente: nessun file in ~/.config/macdeck/claude.\n"
+            "       Aggiungi in testa al comando statusLine di ~/.claude/settings.json:\n"
+            f"       {CLAUDE_STATUSLINE_SNIPPET}"
+        )
+    eta = time.time() - mtime
+    if eta > CLAUDE_STALE_S:
+        return False, f"ponte Claude Code: ultimo file {f.name} di {eta / 3600:.1f} ore fa (nessuna sessione viva)"
+    return True, f"ponte Claude Code: {f.name} aggiornato {int(eta)} s fa"
+
+
+def pagine_con_app_assente(layout: dict) -> list[tuple[str, str]]:
+    """Pagine con `app:` che non corrisponde a nessuna app installata."""
+    fuori = []
+    for p in layout["pages"]:
+        for a in p.get("app") or []:
+            if icons.locate_bundle(a) is None:
+                fuori.append((p["name"], a))
+    return fuori
+
+
 def _doctor(args) -> int:
     ok = True
     ex = Executor()
@@ -119,6 +160,11 @@ def _doctor(args) -> int:
         slot = sum(len(p["slots"]) for p in store.layout["pages"])
         print(f"  OK   layout.yaml: {pagine} pagine, {slot} slot, "
               f"versione {store.version}")
+        for nome, app in pagine_con_app_assente(store.layout):
+            print(f"  --   pagina {nome!r}: app {app!r} non trovata, la pagina non comparira'")
+
+    ok_ponte, msg = claude_bridge_status(args.root)
+    print(f"  {'OK' if ok_ponte else '--'}   {msg}")
 
     if icons.mdi_available(args.root):
         print("  OK   font MDI presente")
@@ -126,7 +172,7 @@ def _doctor(args) -> int:
         print("  --   font MDI assente: esegui `macdeck fetch-fonts` "
               "se vuoi usare le icone mdi:")
 
-    stato = StateProbe(ex).refresh()
+    stato = StateProbe(ex, root=args.root).refresh()
     vol = stato["volume"]["level"]
     print(f"  {'OK' if vol is not None else 'KO'}   volume leggibile: {vol}")
     print(f"  --   media: {stato['media']['app'] or 'nessun player attivo'}")
