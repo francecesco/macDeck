@@ -81,6 +81,9 @@ def create_app(
         - quali SLOT occupano ciascuna casella (`when:` sullo slot);
         - il TESTO delle etichette: i segnaposto `{media.title}` diventano
           il valore corrente, cosi' la firma cambia quando cambia il valore.
+
+        L'ultimo ripiego (`or store.layout["pages"]`) puo' mostrare pagine di
+        app che non sono in primo piano: il mazzo non deve mai restare vuoto.
         """
         if stato is None:
             stato = probe.snapshot()
@@ -117,11 +120,15 @@ def create_app(
             risolte.append({**pagina, "slots": [scelti[i] for i in sorted(scelti)]})
         return risolte
 
-    # L'app che era davanti all'ultimo /layout servito. Se e' cambiata, la
-    # risposta successiva porta il display a pagina 0, dove sta la pagina
-    # dell'app nuova. Se non e' cambiata, si clampa e basta: un brano nuovo
-    # non deve riportare alla pagina Spotify chi e' andato sulla griglia.
-    ricordo = {"front": None}
+    # Il display agisce su cio' che gli e' stato promesso: /press e /screen
+    # leggono il mazzo servito all'ultimo /layout, cosi' un cambio di app fra
+    # un poll e l'altro non puo' far eseguire l'azione di un'altra pagina.
+    # "front" e' l'app che era davanti all'ultimo /layout servito: se e'
+    # cambiata, la risposta successiva porta il display a pagina 0, dove sta
+    # la pagina dell'app nuova; se non e' cambiata, si clampa e basta — un
+    # brano nuovo non deve riportare alla pagina Spotify chi e' andato sulla
+    # griglia.
+    servito = {"front": None, "risolte": None, "version": None}
 
     # Le icone non stanno nel layout: vivono sul disco, dentro i bundle delle
     # app. Se cambia un'icona — o cambia il modo in cui la risolviamo — il
@@ -159,7 +166,11 @@ def create_app(
         return max(0, min(requested, len(risolte) - 1))
 
     def _slot(page_index: int, slot_index: int) -> dict:
-        risolte = _resolve()
+        # Il mazzo servito, non quello vivo: altrimenti un cambio d'app fra
+        # l'ultimo /layout e il tocco farebbe eseguire l'azione di un'altra
+        # pagina che ha uno slot alla stessa casella. Dal vivo solo se non
+        # e' ancora mai stato servito niente (nessun /layout ancora chiesto).
+        risolte = servito["risolte"] if servito["risolte"] is not None else _resolve()
         page = risolte[_page_index(page_index, risolte)]
         for slot in page["slots"]:
             if slot["index"] == slot_index:
@@ -178,14 +189,18 @@ def create_app(
         stato = probe.snapshot()
         risolte = _resolve(stato)
         chiave = _front_key(stato)
-        if chiave != ricordo["front"]:
-            ricordo["front"] = chiave
+        if chiave != servito["front"]:
+            servito["front"] = chiave
             page = 0 if risolte else _page_index(page, risolte)
         else:
             page = _page_index(page, risolte)
         p = risolte[page]
         theme = store.layout["theme"]
         version = _signature(risolte)
+        # Da qui in avanti /press, /tile e /screen(?v=) leggono QUESTO mazzo,
+        # non uno risolto di nuovo: e' la promessa fatta al display.
+        servito["risolte"] = risolte
+        servito["version"] = version
         return {
             "version": version,
             # Con una pagina sola il firmware deve nascondere le frecce.
@@ -219,16 +234,27 @@ def create_app(
         return Response(content=png, media_type="image/png")
 
     @app.get("/screen/{page}.png", dependencies=[Depends(require_token)])
-    def get_screen(page: int) -> Response:
+    def get_screen(page: int, v: int | None = None) -> Response:
         """L'intera schermata come un unico PNG.
 
         E' cio' che il firmware scarica davvero: una richiesta invece di
         dodici. Vedi render.render_screen per il perche'.
+
+        Il display chiede sempre `?v=<versione>`, la stessa che /layout gli
+        ha dato insieme a quell'URL. Se combacia col mazzo servito, la
+        schermata viene da LI' e non da una risoluzione dal vivo che nel
+        frattempo potrebbe essere cambiata (vedi `servito`, sopra): stessa
+        garanzia di /press, per lo stesso motivo.
         """
-        risolte = _resolve()
-        page = _page_index(page, risolte)
+        if v is not None and v == servito["version"] and servito["risolte"] is not None:
+            risolte = servito["risolte"]
+            page = _page_index(page, risolte)
+            key = (page, v)
+        else:
+            risolte = _resolve()
+            page = _page_index(page, risolte)
+            key = (page, _signature(risolte))
         p = risolte[page]
-        key = (page, _signature(risolte))
         png = screens.get(key)
         if png is None:
             png = render.screen_png(
@@ -391,10 +417,10 @@ def create_app(
         boxes = L.slot_boxes(grid)
         index = L.slot_index(pos, grid)
         span = slot.get("span") or 1
-        if not isinstance(span, int) or span < 1 or pos[0] + span > grid["cols"]:
+        if not isinstance(span, int) or span < 1 or int(pos[0]) + span > grid["cols"]:
             span = 1
-        base = boxes.get(index) or next(iter(boxes.values()))
-        slot["box"] = L.span_box(boxes, index, span) if index in boxes else base
+        slot["box"] = (L.span_box(boxes, index, span) if index in boxes
+                       else next(iter(boxes.values())))
         stato = probe.snapshot()
         slot["label"] = fill(slot.get("label") or "", stato)
         slot["caption"] = fill(slot.get("caption") or "", stato)

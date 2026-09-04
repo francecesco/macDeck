@@ -648,7 +648,11 @@ LSAPP_INFO_CHROME = ('"LSDisplayName"="Google Chrome"\n"CFBundleIdentifier"="com
 LAYOUT_PER_APP = {
     "pages": [
         {"name": "Griglia", "slots": [
-            {"pos": [0, 0], "label": "A", "icon": "text:A", "action": {"type": "noop"}}]},
+            {"pos": [0, 0], "label": "A", "icon": "text:A", "action": {"type": "noop"}},
+            # Stesso indice (3) del Play di Spotify, sotto: e' apposta,
+            # serve ai test sulla corsa fra /layout e /press.
+            {"pos": [0, 1], "label": "G", "icon": "text:G",
+             "action": {"type": "shell", "cmd": "echo GRIGLIA"}}]},
         {"name": "Spotify", "app": "com.spotify.client", "grid": {"cols": 3, "rows": 2},
          "slots": [
             {"pos": [0, 0], "kind": "info", "label": "{media.title}",
@@ -787,3 +791,76 @@ def test_api_icons_espone_il_bundle_id(ctx):
     apps = client.get("/api/icons", headers=LOCAL).json()["apps"]
     if apps:                                   # dipende dal Mac che esegue i test
         assert "bundle" in apps[0]
+
+
+def test_tile_preview_accetta_una_posizione_in_stringa(ctx):
+    client, *_ = ctx
+    r = client.post("/api/tile-preview", headers=LOCAL, json={
+        "grid": {"cols": 3, "rows": 2},
+        "slot": {"pos": ["0", "0"], "span": 2, "label": "S", "icon": "text:S"},
+    })
+    assert r.status_code == 200
+
+
+# ---------------------------------------- la corsa fra /layout e /press
+
+
+def test_press_agisce_sulla_pagina_servita_non_su_quella_viva(ctx):
+    """Il caso reale: Spotify davanti, tocco su Play. Prima del prossimo
+    poll l'utente passa a Chrome con Alt-Tab: /press non deve eseguire
+    l'azione della Griglia, che ha uno slot alla stessa casella."""
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY)
+    probe.refresh()
+    client.get("/layout?page=0", headers=AUTH)     # servito: Spotify, pagina 0
+    _davanti(fake_ex, LSAPP_INFO_CHROME)
+    probe.refresh()                                # cambio dal vivo, nessun /layout nuovo
+    r = client.post("/press", headers=AUTH, json={"page": 0, "slot": 3})
+    assert r.json()["ok"] is True
+    assert any("playpause" in s for s in fake_ex.scripts)          # Play di Spotify
+    assert not any("GRIGLIA" in " ".join(c) for c in fake_ex.calls)  # non la Griglia
+
+
+def test_screen_con_la_versione_servita_mostra_il_mazzo_servito(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY)
+    probe.refresh()
+    body = client.get("/layout?page=0", headers=AUTH).json()
+    v = body["version"]
+    prima = client.get(f"/screen/0.png?v={v}", headers=AUTH).content
+    _davanti(fake_ex, LSAPP_INFO_CHROME)
+    probe.refresh()
+    servita = client.get(f"/screen/0.png?v={v}", headers=AUTH).content
+    assert servita == prima          # il mazzo servito non si muove sotto al display
+    viva = client.get("/screen/0.png", headers=AUTH).content
+    assert viva != prima             # senza 'v' combaciante si vede il mazzo dal vivo
+
+
+def test_il_ricordo_si_aggiorna_solo_in_layout(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_CHROME)
+    probe.refresh()
+    client.get("/layout?page=0", headers=AUTH)                # fissa il ricordo: Chrome
+    body = client.get("/layout?page=1", headers=AUTH).json()  # swipe manuale su Altra
+    assert body["page"] == 1
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY)
+    probe.refresh()
+    client.get("/screen/1.png", headers=AUTH)                  # non deve consumare il salto
+    client.post("/press", headers=AUTH, json={"page": 1, "slot": 0})  # nemmeno /press
+    body = client.get("/layout?page=1", headers=AUTH).json()
+    assert body["page"] == 0 and body["pages"][0] == "Spotify"
+
+
+def test_pagina_fuori_intervallo_durante_un_salto_va_a_zero(ctx):
+    client, store, fake_ex, probe = ctx
+    store.save(LAYOUT_PER_APP)
+    _davanti(fake_ex, LSAPP_INFO_CHROME)
+    probe.refresh()
+    client.get("/layout?page=0", headers=AUTH)     # fissa il ricordo: Chrome
+    _davanti(fake_ex, LSAPP_INFO_SPOTIFY)
+    probe.refresh()
+    body = client.get("/layout?page=99", headers=AUTH).json()
+    assert body["page"] == 0
