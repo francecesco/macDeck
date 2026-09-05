@@ -82,7 +82,6 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                  "icon": "app:/Applications/Postman.app",
                  "action": {"type": "app", "target": "Postman"}},
 
-                # --- riga in basso: app quando non c'e' musica ---
                 {"pos": [0, 2], "label": "Slack",
                  "icon": "app:/Applications/Slack.app",
                  "action": {"type": "app", "target": "Slack"}},
@@ -92,17 +91,7 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                 {"pos": [2, 2], "label": "Screenshot", "icon": "mdi:camera",
                  "action": {"type": "keys", "keys": "cmd+shift+4"}},
 
-                # --- ...e comandi multimediali quando c'e'. Stesse caselle:
                 #     lo slot condizionale soddisfatto vince su quello sotto.
-                {"pos": [0, 2], "label": "Indietro", "icon": "mdi:skip-previous",
-                 "when": "media.app",
-                 "action": {"type": "media", "op": "prev"}},
-                {"pos": [1, 2], "label": "Play / Pausa", "icon": "mdi:play-pause",
-                 "when": "media.app",
-                 "action": {"type": "media", "op": "play_pause"}},
-                {"pos": [2, 2], "label": "Avanti", "icon": "mdi:skip-next",
-                 "when": "media.app",
-                 "action": {"type": "media", "op": "next"}},
             ],
         },
 
