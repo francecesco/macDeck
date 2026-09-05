@@ -149,19 +149,25 @@ DEFAULT_LAYOUT: dict[str, Any] = {
                  "label": "{claude.model}", "caption": "modello"},
                 {"pos": [1, 0], "kind": "info", "icon": "mdi:gauge",
                  "label": "{claude.remaining|int}%", "caption": "contesto rimanente"},
-                {"pos": [2, 0], "kind": "info", "icon": "mdi:folder-outline",
+                # Utilizzo del piano: la finestra di cinque ore e' quella che
+                # si esaurisce lavorando; il reset dice quando si riparte.
+                {"pos": [2, 0], "kind": "info", "icon": "mdi:timer-sand",
+                 "label": "{claude.session_used|int}%",
+                 "caption": "sessione · reset {claude.session_resets} · "
+                            "settimana {claude.week_used|int}%"},
+                {"pos": [0, 1], "kind": "info", "icon": "mdi:folder-outline",
                  "label": "{claude.dir}", "caption": "{claude.branch}"},
-                {"pos": [0, 1], "label": "Esc", "icon": "mdi:keyboard-esc",
+                {"pos": [1, 1], "label": "Esc", "icon": "mdi:keyboard-esc",
                  "action": {"type": "keys", "keys": "escape"}},
-                {"pos": [1, 1], "label": "Invio", "icon": "mdi:keyboard-return",
+                {"pos": [2, 1], "label": "Invio", "icon": "mdi:keyboard-return",
                  "action": {"type": "keys", "keys": "return"}},
-                {"pos": [2, 1], "label": "Modalità", "icon": "mdi:swap-horizontal",
+                {"pos": [0, 2], "label": "Modalità", "icon": "mdi:swap-horizontal",
                  "action": {"type": "keys", "keys": "shift+tab"}},
-                {"pos": [0, 2], "label": "/compact", "icon": "mdi:arrow-collapse",
+                {"pos": [1, 2], "label": "/compact", "icon": "mdi:arrow-collapse",
                  "action": {"type": "sequence", "steps": [
                      {"type": "text", "text": "/compact"},
                      {"type": "keys", "keys": "return"}]}},
-                {"pos": [1, 2], "label": "/clear", "icon": "mdi:broom",
+                {"pos": [2, 2], "label": "/clear", "icon": "mdi:broom",
                  "action": {"type": "sequence", "steps": [
                      {"type": "text", "text": "/clear"},
                      {"type": "keys", "keys": "return"}]}},

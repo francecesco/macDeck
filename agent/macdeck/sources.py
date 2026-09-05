@@ -361,13 +361,29 @@ def _purge_old(dir_: Path, now: float) -> None:
 
 
 CLAUDE_EMPTY = {"alive": False, "model": None, "remaining": None,
-                "dir": None, "branch": None, "session": None}
+                "dir": None, "branch": None, "session": None,
+                "session_used": None, "week_used": None, "session_resets": None}
+
+
+def _percent(value) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _local_hhmm(epoch) -> str | None:
+    """Un istante Unix come ora locale 'HH:MM', per la didascalia del reset."""
+    try:
+        return time.strftime("%H:%M", time.localtime(float(epoch)))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
 
 
 @source("claude", empty=CLAUDE_EMPTY, every=5.0)
 def claude(ex: Executor, ctx: ProbeContext) -> dict | None:
-    """Modello, contesto rimanente e cartella dell'ultima sessione di Claude
-    Code con cui si e' parlato.
+    """Modello, contesto rimanente, cartella e utilizzo del piano dell'ultima
+    sessione di Claude Code con cui si e' parlato.
 
     I dati li scrive la statusLine dell'utente in un file per sessione (vedi
     README, "Il ponte con Claude Code"): l'agent non legge i transcript, che
@@ -402,11 +418,15 @@ def claude(ex: Executor, ctx: ProbeContext) -> dict | None:
     if cwd and (cwd == home or cwd.startswith(home + "/")):
         cwd = "~" + cwd[len(home):]
 
-    remaining = (data.get("context_window") or {}).get("remaining_percentage")
-    try:
-        remaining = float(remaining) if remaining is not None else None
-    except (TypeError, ValueError):
-        remaining = None
+    remaining = _percent(
+        (data.get("context_window") or {}).get("remaining_percentage"))
+
+    # Il blocco rate_limits e' l'utilizzo del piano: la finestra di cinque
+    # ore ("la sessione") e quella di sette giorni. Manca nelle versioni
+    # vecchie di Claude Code: allora le chiavi restano vuote.
+    limiti = data.get("rate_limits") or {}
+    cinque = limiti.get("five_hour") or {}
+    sette = limiti.get("seven_day") or {}
 
     return {
         "alive": bool(alive),
@@ -415,4 +435,8 @@ def claude(ex: Executor, ctx: ProbeContext) -> dict | None:
         "dir": cwd,
         "branch": branch,
         "session": data.get("session_id") or None,
+        "session_used": _percent(cinque.get("used_percentage")),
+        "week_used": _percent(sette.get("used_percentage")),
+        "session_resets": _local_hhmm(cinque.get("resets_at"))
+        if cinque.get("resets_at") is not None else None,
     }

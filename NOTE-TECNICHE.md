@@ -768,7 +768,7 @@ ricordo si scrive **solo** in `/layout`.
 
 ```bash
 cd agent
-.venv/bin/python -m pytest                        # 408 test (1 skipped), nessun hardware
+.venv/bin/python -m pytest                        # 412 test (1 skipped), nessun hardware
 .venv/bin/python -m macdeck.cli doctor            # permessi e configurazione
 .venv/bin/python -m macdeck.cli token             # token da mettere nei secrets
 .venv/bin/python -m macdeck.cli pair              # insegna al deck la rete di adesso

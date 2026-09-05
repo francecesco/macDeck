@@ -227,7 +227,8 @@ def test_claude_vivo_legge_modello_percentuale_cartella_e_branch(fake_ex, tmp_pa
     }
     c = sources.claude(fake_ex, _ctx_root(tmp_path))
     assert c == {"alive": True, "model": "Fable 5.1", "remaining": 38.4,
-                 "dir": "~/macdeck", "branch": "main", "session": "abc-123"}
+                 "dir": "~/macdeck", "branch": "main", "session": "abc-123",
+                 "session_used": None, "week_used": None, "session_resets": None}
 
 
 def test_claude_senza_processo_non_e_vivo_ma_i_dati_restano(fake_ex, tmp_path):
@@ -266,7 +267,8 @@ def test_claude_senza_file_e_il_valore_vuoto_non_un_fallimento(fake_ex, tmp_path
     paths.claude_dir(tmp_path)
     c = sources.claude(fake_ex, _ctx_root(tmp_path))
     assert c == {"alive": False, "model": None, "remaining": None,
-                 "dir": None, "branch": None, "session": None}
+                 "dir": None, "branch": None, "session": None,
+                 "session_used": None, "week_used": None, "session_resets": None}
 
 
 def test_claude_file_malformato_vale_come_assente(fake_ex, tmp_path):
@@ -306,3 +308,39 @@ def test_claude_la_home_stessa_diventa_tilde(fake_ex, tmp_path):
 def test_claude_non_e_vincolata_a_unapp_gui():
     assert sources.REGISTRY["claude"].app == ()
     assert sources.REGISTRY["claude"].every == 5.0
+
+
+# --------------------------------------------------- claude: limiti di utilizzo
+
+def test_claude_legge_utilizzo_sessione_settimana_e_reset(fake_ex, tmp_path):
+    import datetime as dt
+    reset = dt.datetime(2026, 9, 5, 19, 0).timestamp()      # locale
+    dati = {**STATUS, "rate_limits": {
+        "five_hour": {"used_percentage": 11, "resets_at": reset},
+        "seven_day": {"used_percentage": 1, "resets_at": reset + 86400},
+    }}
+    _scrivi(paths.claude_dir(tmp_path), "abc-123", dati)
+    fake_ex.replies = {"pgrep": R(True, out="1\n")}
+    c = sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert c["session_used"] == 11.0
+    assert c["week_used"] == 1.0
+    assert c["session_resets"] == "19:00"
+
+
+def test_claude_senza_rate_limits_lascia_le_chiavi_vuote(fake_ex, tmp_path):
+    _scrivi(paths.claude_dir(tmp_path), "abc-123", STATUS)
+    fake_ex.replies = {"pgrep": R(True, out="1\n")}
+    c = sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert c["session_used"] is None
+    assert c["week_used"] is None
+    assert c["session_resets"] is None
+
+
+def test_claude_rate_limits_malformati_non_rompono_la_sonda(fake_ex, tmp_path):
+    dati = {**STATUS, "rate_limits": {"five_hour": {"used_percentage": "boh",
+                                                    "resets_at": "ieri"}}}
+    _scrivi(paths.claude_dir(tmp_path), "abc-123", dati)
+    fake_ex.replies = {"pgrep": R(True, out="1\n")}
+    c = sources.claude(fake_ex, _ctx_root(tmp_path))
+    assert c["alive"] is True
+    assert c["session_used"] is None and c["session_resets"] is None

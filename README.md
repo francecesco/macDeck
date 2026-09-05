@@ -196,7 +196,7 @@ piano. Con lo swipe si torna alla griglia; al prossimo cambio di app si risalta.
 ```
 
 Le chiavi disponibili per i segnaposto (`{mail.unread}`, `{claude.model}`,
-`{claude.remaining|int}`, `{calendar.next}`, `{slack.badge}`…) le elenca la GUI
+`{claude.remaining|int}`, `{claude.session_used|int}` (utilizzo della finestra di cinque ore), `{calendar.next}`, `{slack.badge}`…) le elenca la GUI
 nel menu «Inserisci valore». `app:` e `when:` si combinano: la pagina Claude Code
 ha `app: [com.googlecode.iterm2, com.apple.Terminal]` e `when: claude.alive`.
 
@@ -271,7 +271,7 @@ immagine) · `emoji:` (a colori) · `text:` (fino a 3 caratteri).
 ## Test
 
 ```bash
-cd agent && .venv/bin/python -m pytest        # 408 test (1 skipped), nessun hardware richiesto
+cd agent && .venv/bin/python -m pytest        # 412 test (1 skipped), nessun hardware richiesto
 ```
 
 Il 90% del sistema è testabile senza il display: `executor.py` è l'unico modulo

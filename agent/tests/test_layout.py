@@ -385,3 +385,15 @@ def test_i_segnaposto_del_default_esistono_nel_registro():
         for s in p["slots"]:
             for k in placeholders(s["label"] or "") + placeholders(s["caption"] or ""):
                 assert k in note, f"{p['name']}: {k}"
+
+
+def test_la_pagina_claude_ha_lutilizzo_della_sessione_in_terza_casella():
+    out = L.validate(L.DEFAULT_LAYOUT)
+    claude = next(p for p in out["pages"] if p["name"] == "Claude Code")
+    per_pos = {tuple(s["pos"]): s for s in claude["slots"]}
+    assert per_pos[(2, 0)]["kind"] == "info"
+    assert "{claude.session_used|int}%" in per_pos[(2, 0)]["label"]
+    assert per_pos[(0, 1)]["kind"] == "info" and "{claude.dir}" in per_pos[(0, 1)]["label"]
+    assert per_pos[(1, 1)]["label"] == "Esc"
+    assert per_pos[(2, 2)]["label"] == "/clear"
+    assert len(claude["slots"]) == 9
