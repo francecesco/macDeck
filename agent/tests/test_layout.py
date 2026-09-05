@@ -357,10 +357,11 @@ def test_i_layout_di_ieri_validano_uguali():
             assert s["action"] is not None
 
 
-def test_il_default_ha_le_cinque_pagine_per_app():
+def test_il_default_ha_una_pagina_per_ogni_app_della_home():
     out = L.validate(L.DEFAULT_LAYOUT)
     per_app = {p["name"]: p["app"] for p in out["pages"] if p["app"]}
-    assert set(per_app) == {"Spotify", "Mail", "Claude Code", "Slack", "Calendar"}
+    assert set(per_app) == {"WhatsApp", "Mail", "Slack", "DataGrip", "Claude",
+                            "Calendar", "Spotify", "Chrome", "Claude Code"}
     assert per_app["Claude Code"] == ["com.googlecode.iterm2", "com.apple.terminal"]
     claude = next(p for p in out["pages"] if p["name"] == "Claude Code")
     assert claude["when"] == "claude.alive"
@@ -397,3 +398,16 @@ def test_la_pagina_claude_ha_lutilizzo_della_sessione_in_terza_casella():
     assert per_pos[(1, 1)]["label"] == "Esc"
     assert per_pos[(2, 2)]["label"] == "/clear"
     assert len(claude["slots"]) == 9
+
+
+def test_ogni_app_della_home_ha_la_sua_pagina_di_dettaglio():
+    out = L.validate(L.DEFAULT_LAYOUT)
+    per_app = {p["name"]: p for p in out["pages"] if p["app"]}
+    attese = {"WhatsApp", "Mail", "Slack", "DataGrip", "Claude", "Calendar",
+              "Spotify", "Chrome", "Claude Code"}
+    assert attese <= set(per_app)
+    for nome in attese - {"Claude Code"}:
+        info = [s for s in per_app[nome]["slots"] if s["kind"] == "info"]
+        assert info, nome          # almeno un dato vivo per pagina
+    spotify = per_app["Spotify"]
+    assert any(s.get("state") == "media.shuffle" for s in spotify["slots"])

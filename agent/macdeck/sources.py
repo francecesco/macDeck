@@ -121,6 +121,25 @@ VOLUME_SCRIPT = (
 
 
 def _media_script() -> str:
+    """Nove righe per player: app, playing, titolo, artista, album, durata in
+    ms, shuffle, ripeti, volume. Music misura la durata in secondi e chiama
+    le cose con altri nomi: si normalizza qui, dentro lo script, cosi' il
+    parser vede una forma sola."""
+    dettagli = {
+        "Spotify": (
+            "(album of current track) & linefeed & "
+            "(duration of current track) & linefeed & "
+            "(shuffling as text) & linefeed & (repeating as text) & linefeed & "
+            "(sound volume as text)"
+        ),
+        "Music": (
+            "(album of current track) & linefeed & "
+            "(((duration of current track) * 1000) as integer) & linefeed & "
+            "(shuffle enabled as text) & linefeed & "
+            "((song repeat is not off) as text) & linefeed & "
+            "(sound volume as text)"
+        ),
+    }
     branches = []
     for i, player in enumerate(MEDIA_PLAYERS):
         keyword = "if" if i == 0 else "else if"
@@ -134,7 +153,8 @@ def _media_script() -> str:
             '            set out to out & "false" & linefeed\n'
             "        end if\n"
             "        set out to out & (name of current track) & linefeed & "
-            "(artist of current track)\n"
+            "(artist of current track) & linefeed & "
+            f"{dettagli[player]}\n"
             "        return out\n"
             "    end tell"
         )
@@ -168,23 +188,46 @@ def volume(ex: Executor, ctx: ProbeContext) -> dict | None:
 # esiste un 'now playing' di sistema leggibile senza helper esterni.
 # Si interrogano i player noti. L'audio da browser non e' visibile:
 # e' un limite dichiarato, non un bug.
+def _mmss(ms) -> str | None:
+    try:
+        sec = int(float(ms)) // 1000
+    except (TypeError, ValueError):
+        return None
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
+def _int_or_none(v):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
 @source("media", empty={"app": None, "playing": False, "title": None,
-                        "artist": None}, every=2.0)
+                        "artist": None, "album": None, "duration": None,
+                        "shuffle": False, "repeat": False, "volume": None},
+        every=2.0)
 def media(ex: Executor, ctx: ProbeContext) -> dict | None:
     # Nessun `app=`: lo script controlla da se' quali player sono aperti e
-    # non ne lancia nessuno.
+    # non ne lancia nessuno. Niente posizione nel brano: cambierebbe ogni
+    # secondo e farebbe ridisegnare lo schermo a ogni poll.
     r = ex.osascript(MEDIA_SCRIPT)
     if not r.ok:
         return None
     lines = r.out.strip().splitlines()
     if not lines or lines[0].strip() == "none":
         return {}
-    padded = (lines + ["", "", "", ""])[:4]
+    padded = [x.strip() for x in (lines + [""] * 9)[:9]]
     return {
-        "app": padded[0].strip() or None,
-        "playing": padded[1].strip().lower() == "true",
-        "title": padded[2].strip() or None,
-        "artist": padded[3].strip() or None,
+        "app": padded[0] or None,
+        "playing": padded[1].lower() == "true",
+        "title": padded[2] or None,
+        "artist": padded[3] or None,
+        "album": padded[4] or None,
+        "duration": _mmss(padded[5]) if padded[5] else None,
+        "shuffle": padded[6].lower() == "true",
+        "repeat": padded[7].lower() == "true",
+        "volume": _int_or_none(padded[8]) if padded[8] else None,
     }
 
 
@@ -252,18 +295,50 @@ def front(ex: Executor, ctx: ProbeContext) -> dict | None:
 
 # ------------------------------------------------------------------ Mail
 
-MAIL_SCRIPT = 'tell application "Mail" to return unread count of inbox'
+MAIL_SCRIPT = """\
+tell application "Mail"
+    set n to unread count of inbox
+    set s to ""
+    set m to ""
+    if (count of messages of inbox) > 0 then
+        set s to subject of message 1 of inbox
+        set m to sender of message 1 of inbox
+    end if
+    return (n as text) & linefeed & s & linefeed & m & linefeed & (count of messages of drafts mailbox)
+end tell"""
+
+_SENDER = re.compile(r"^\s*\"?([^\"<]*?)\"?\s*<([^>]+)>\s*$")
 
 
-@source("mail", empty={"unread": None}, every=5.0, app=("com.apple.mail",))
+def _sender_name(raw: str) -> str | None:
+    """'Nome Cognome <a@b.it>' -> 'Nome Cognome'; senza nome resta l'indirizzo."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    m = _SENDER.match(raw)
+    if not m:
+        return raw
+    return m.group(1).strip() or m.group(2).strip()
+
+
+@source("mail", empty={"unread": None, "latest_subject": None,
+                       "latest_sender": None, "drafts": None},
+        every=5.0, app=("com.apple.mail",))
 def mail(ex: Executor, ctx: ProbeContext) -> dict | None:
     r = ex.osascript(MAIL_SCRIPT)
     if not r.ok:
         return None
+    lines = [x.strip() for x in (r.out.split("\n") + [""] * 4)[:4]]
     try:
-        return {"unread": int(r.out.strip())}
+        unread = int(lines[0])
     except ValueError:
         return None
+    return {
+        "unread": unread,
+        "latest_subject": lines[1] or None,
+        "latest_sender": _sender_name(lines[2]),
+        "drafts": _int_or_none(lines[3]) if lines[3] else None,
+    }
 
 
 # ----------------------------------------------------------------- Slack
@@ -439,4 +514,89 @@ def claude(ex: Executor, ctx: ProbeContext) -> dict | None:
         "week_used": _percent(sette.get("used_percentage")),
         "session_resets": _local_hhmm(cinque.get("resets_at"))
         if cinque.get("resets_at") is not None else None,
+    }
+
+
+# ----------------------------------------------- finestra in primo piano
+
+# "item 1 of (every process whose frontmost is true)" e non "first process
+# whose...": la sonda dell'accessibilita' si riconosce dalla frase "first
+# process", e due script che la contengono si confonderebbero nei test.
+WINDOW_SCRIPT = (
+    'tell application "System Events" to return name of front window of '
+    "(item 1 of (every process whose frontmost is true))"
+)
+
+
+@source("window", empty={"title": None}, every=2.0)
+def window(ex: Executor, ctx: ProbeContext) -> dict | None:
+    """Il titolo della finestra davanti: per le app senza dizionario
+    AppleScript (DataGrip, Claude, WhatsApp) e' l'unico dato che si legge.
+    Un'app senza finestre fa fallire lo script: non e' un guasto, e' un
+    titolo assente."""
+    r = ex.osascript(WINDOW_SCRIPT)
+    if not r.ok:
+        return {"title": None}
+    return {"title": r.out.strip() or None}
+
+
+# -------------------------------------------------------------- WhatsApp
+
+WHATSAPP_BADGE_SCRIPT = (
+    'tell application "System Events" to tell process "Dock" to '
+    'return value of attribute "AXStatusLabel" of UI element "WhatsApp" of list 1'
+)
+
+
+@source("whatsapp", empty={"badge": None}, every=5.0,
+        app=("net.whatsapp.WhatsApp",))
+def whatsapp(ex: Executor, ctx: ProbeContext) -> dict | None:
+    r = ex.osascript(WHATSAPP_BADGE_SCRIPT)
+    if not r.ok:
+        return None
+    badge = r.out.strip()
+    if not badge or badge == "missing value":
+        return {"badge": None}
+    return {"badge": badge}
+
+
+# ---------------------------------------------------------------- Chrome
+
+# Chrome ha un dizionario AppleScript: la prima lettura fa chiedere a macOS
+# il permesso Automazione per l'interprete, una volta sola.
+CHROME_SCRIPT = """\
+tell application "Google Chrome"
+    set n to 0
+    repeat with w in windows
+        set n to n + (count of tabs of w)
+    end repeat
+    if (count of windows) > 0 then
+        return (title of active tab of front window) & linefeed & (URL of active tab of front window) & linefeed & (n as text)
+    end if
+    return linefeed & linefeed & "0"
+end tell"""
+
+
+def _host(url: str) -> str | None:
+    from urllib.parse import urlsplit
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        return None
+    if not host:
+        return None
+    return host[4:] if host.startswith("www.") else host
+
+
+@source("chrome", empty={"title": None, "host": None, "tabs": None},
+        every=2.0, app=("com.google.Chrome",))
+def chrome(ex: Executor, ctx: ProbeContext) -> dict | None:
+    r = ex.osascript(CHROME_SCRIPT)
+    if not r.ok:
+        return None
+    lines = [x.strip() for x in (r.out.split("\n") + [""] * 3)[:3]]
+    return {
+        "title": lines[0] or None,
+        "host": _host(lines[1]) if lines[1] else None,
+        "tabs": _int_or_none(lines[2]) if lines[2] else None,
     }

@@ -235,3 +235,11 @@ def test_classificazione_sincrono_asincrono():
         assert actions.is_async({"type": t}), t
     for t in ("app", "keys", "text", "url", "volume", "media", "page", "delay"):
         assert not actions.is_async({"type": t}), t
+
+
+def test_media_shuffle_e_repeat_hanno_un_comando_per_player(fake_ex):
+    actions.run({"type": "media", "op": "shuffle_toggle"}, fake_ex)
+    actions.run({"type": "media", "op": "repeat_toggle"}, fake_ex)
+    s1, s2 = fake_ex.scripts[-2:]
+    assert "set shuffling to not shuffling" in s1 and "shuffle enabled" in s1
+    assert "set repeating to not repeating" in s2 and "song repeat" in s2

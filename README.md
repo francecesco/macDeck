@@ -196,7 +196,7 @@ piano. Con lo swipe si torna alla griglia; al prossimo cambio di app si risalta.
 ```
 
 Le chiavi disponibili per i segnaposto (`{mail.unread}`, `{claude.model}`,
-`{claude.remaining|int}`, `{claude.session_used|int}` (utilizzo della finestra di cinque ore), `{calendar.next}`, `{slack.badge}`…) le elenca la GUI
+`{claude.remaining|int}`, `{claude.session_used|int}` (utilizzo della finestra di cinque ore), `{calendar.next}`, `{slack.badge}`, `{window.title}` (titolo della finestra davanti, per le app senza dizionario AppleScript), `{chrome.title}`, `{media.album}`…) le elenca la GUI
 nel menu «Inserisci valore». `app:` e `when:` si combinano: la pagina Claude Code
 ha `app: [com.googlecode.iterm2, com.apple.Terminal]` e `when: claude.alive`.
 
@@ -234,7 +234,7 @@ l'ultima con cui hai parlato.
 | `applescript` | `script` | asincrona |
 | `shortcut` | `name` | Shortcut di macOS, asincrona |
 | `volume` | `op` (`set`/`up`/`down`/`mute_toggle`), `value`, `step` | |
-| `media` | `op` (`play_pause`/`next`/`prev`) | solo Spotify e Music, vedi limiti |
+| `media` | `op` (`play_pause`/`next`/`prev`/`shuffle_toggle`/`repeat_toggle`) | solo Spotify e Music, vedi limiti |
 | `page` | — | gestito dal firmware in locale |
 | `sequence` | `steps` | componibile, anche annidata |
 | `delay` | `ms` | passo dentro una sequence |
@@ -271,7 +271,7 @@ immagine) · `emoji:` (a colori) · `text:` (fino a 3 caratteri).
 ## Test
 
 ```bash
-cd agent && .venv/bin/python -m pytest        # 412 test (1 skipped), nessun hardware richiesto
+cd agent && .venv/bin/python -m pytest        # 427 test (1 skipped), nessun hardware richiesto
 ```
 
 Il 90% del sistema è testabile senza il display: `executor.py` è l'unico modulo

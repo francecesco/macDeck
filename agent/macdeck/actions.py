@@ -27,10 +27,25 @@ _BUNDLE_ID = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+){2,}$")
 
 MEDIA_PLAYERS = ("Spotify", "Music")
 
-_MEDIA_OPS = {
+# Un comando per tutti i player, oppure un dizionario per player quando i
+# dizionari AppleScript divergono: shuffle e ripeti si chiamano in modo
+# diverso in Spotify e in Music, e in Music "ripeti" e' un'enumerazione.
+_MEDIA_OPS: dict[str, str | dict[str, str]] = {
     "play_pause": "playpause",
     "next": "next track",
     "prev": "previous track",
+    "shuffle_toggle": {
+        "Spotify": "set shuffling to not shuffling",
+        "Music": "set shuffle enabled to not shuffle enabled",
+    },
+    "repeat_toggle": {
+        "Spotify": "set repeating to not repeating",
+        "Music": "if song repeat is off then\n"
+                 "        set song repeat to all\n"
+                 "    else\n"
+                 "        set song repeat to off\n"
+                 "    end if",
+    },
 }
 
 
@@ -153,9 +168,12 @@ def _media(spec: dict, ex: Executor) -> Result:
     branches = []
     for i, player in enumerate(MEDIA_PLAYERS):
         keyword = "if" if i == 0 else "else if"
+        per_player = command[player] if isinstance(command, dict) else command
         branches.append(
             f'{keyword} running_apps contains "{player}" then\n'
-            f'    tell application "{player}" to {command}'
+            f'    tell application "{player}"\n'
+            f'    {per_player}\n'
+            f'    end tell'
         )
     return ex.osascript(
         'tell application "System Events" to '

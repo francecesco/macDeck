@@ -136,7 +136,8 @@ def test_front_e_registrato_con_cadenza_di_un_secondo():
 
 def test_mail_legge_le_non_lette(fake_ex):
     fake_ex.replies = {"unread count": R(True, out="12\n")}
-    assert sources.mail(fake_ex, _ctx()) == {"unread": 12}
+    assert sources.mail(fake_ex, _ctx()) == {
+        "unread": 12, "latest_subject": None, "latest_sender": None, "drafts": None}
 
 
 def test_mail_con_output_strano_fallisce(fake_ex):
@@ -344,3 +345,94 @@ def test_claude_rate_limits_malformati_non_rompono_la_sonda(fake_ex, tmp_path):
     c = sources.claude(fake_ex, _ctx_root(tmp_path))
     assert c["alive"] is True
     assert c["session_used"] is None and c["session_resets"] is None
+
+
+# ------------------------------------------------ finestra in primo piano
+
+def test_window_legge_il_titolo_della_finestra(fake_ex):
+    fake_ex.replies = {"front window": R(True, out="macdeck — sources.py\n")}
+    assert sources.window(fake_ex, _ctx()) == {"title": "macdeck — sources.py"}
+
+
+def test_window_senza_finestre_e_vuoto_non_fallimento(fake_ex):
+    fake_ex.replies = {"front window": R(False, error="Impossibile ottenere front window")}
+    assert sources.window(fake_ex, _ctx()) == {"title": None}
+
+
+def test_window_ha_cadenza_di_due_secondi_senza_gate():
+    assert sources.REGISTRY["window"].every == 2.0
+    assert sources.REGISTRY["window"].app == ()
+
+
+# ------------------------------------------------------ media, campi extra
+
+def test_media_legge_album_durata_shuffle_ripeti_volume(fake_ex):
+    fake_ex.replies = {"running_apps": R(True, out=(
+        "Spotify\ntrue\nAnagrafe\nMarlene Kuntz\nHo ucciso paranoia\n"
+        "245000\ntrue\nfalse\n30\n"))}
+    m = sources.media(fake_ex, _ctx())
+    assert m["album"] == "Ho ucciso paranoia"
+    assert m["duration"] == "4:05"
+    assert m["shuffle"] is True and m["repeat"] is False
+    assert m["volume"] == 30
+
+
+def test_media_con_le_sole_quattro_righe_di_ieri_resta_valido(fake_ex):
+    fake_ex.replies = {"running_apps": R(True, out="Spotify\ntrue\nAnagrafe\nMarlene Kuntz\n")}
+    m = sources.media(fake_ex, _ctx())
+    assert m["title"] == "Anagrafe"
+    assert m["album"] is None and m["duration"] is None
+    assert m["shuffle"] is False and m["volume"] is None
+
+
+def test_media_empty_ha_i_campi_nuovi():
+    e = sources.REGISTRY["media"].empty
+    assert {"album", "duration", "shuffle", "repeat", "volume"} <= set(e)
+
+
+# ------------------------------------------------------- mail, campi extra
+
+def test_mail_legge_ultimo_messaggio_e_bozze(fake_ex):
+    fake_ex.replies = {"unread count": R(True, out=(
+        "12\nFwd: SI.Ter - Datawarehouse\nLorena Brunetti <l.b@example.it>\n2\n"))}
+    m = sources.mail(fake_ex, _ctx())
+    assert m == {"unread": 12, "latest_subject": "Fwd: SI.Ter - Datawarehouse",
+                 "latest_sender": "Lorena Brunetti", "drafts": 2}
+
+
+def test_mail_con_inbox_vuota(fake_ex):
+    fake_ex.replies = {"unread count": R(True, out="0\n\n\n0\n")}
+    m = sources.mail(fake_ex, _ctx())
+    assert m["unread"] == 0 and m["latest_subject"] is None and m["latest_sender"] is None
+
+
+def test_mail_mittente_senza_nome_tiene_lindirizzo(fake_ex):
+    fake_ex.replies = {"unread count": R(True, out="1\nCiao\n<solo@indirizzo.it>\n0\n")}
+    assert sources.mail(fake_ex, _ctx())["latest_sender"] == "solo@indirizzo.it"
+
+
+# ------------------------------------------------------------- WhatsApp
+
+def test_whatsapp_badge(fake_ex):
+    fake_ex.replies = {"AXStatusLabel": R(True, out="4\n")}
+    assert sources.whatsapp(fake_ex, _ctx()) == {"badge": "4"}
+    assert sources.REGISTRY["whatsapp"].app == ("net.whatsapp.whatsapp",)
+
+
+# --------------------------------------------------------------- Chrome
+
+def test_chrome_legge_titolo_sito_e_schede(fake_ex):
+    fake_ex.replies = {"active tab": R(True, out=(
+        "MacDeck — GitHub\nhttps://www.github.com/francecesco/macDeck/pulls\n17\n"))}
+    assert sources.chrome(fake_ex, _ctx()) == {
+        "title": "MacDeck — GitHub", "host": "github.com", "tabs": 17}
+
+
+def test_chrome_senza_finestre(fake_ex):
+    fake_ex.replies = {"active tab": R(True, out="\n\n0\n")}
+    c = sources.chrome(fake_ex, _ctx())
+    assert c["title"] is None and c["host"] is None and c["tabs"] == 0
+
+
+def test_chrome_e_vincolato_allapp():
+    assert sources.REGISTRY["chrome"].app == ("com.google.chrome",)
